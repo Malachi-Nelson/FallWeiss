@@ -1,0 +1,20 @@
+fileFormatVersion: 2
+guid: d5427b5a626e3164da625968491c1b3a
+timeCreated: 1515293244
+licenseType: Store
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Demo_scene/Test_stuff_for_the_scene/soilder_show.cs
+  uploadId: 222933

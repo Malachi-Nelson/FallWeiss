@@ -1,0 +1,364 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fd9bec59100031f45b5b6a6a65ec99ae, type: 3}
+  m_Name: SoldierLib
+  m_EditorClassIdentifier: FallWeiss::FallWeiss.SoldierLib
+  rigs:
+  - key: K98
+    main: Weapon_handle.002
+    rh: {x: 0.033762597, y: 0.031705193, z: -0.4665487}
+    lh: {x: -0.080120094, y: 0.013988994, z: -0.16510886}
+    head: {x: -0.1262401, y: 0.06680197, z: -0.77346605}
+    rhRot: {x: -0.35257706, y: -0.46623403, z: -0.67859805, w: -0.44476995}
+    lhRot: {x: -0.01654629, y: -0.33198345, z: -0.6570491, w: 0.6766094}
+    parts:
+    - Weapon_handle.002
+    - Weapon_handle.003
+    - Weapon_handle
+    - Weapon_handle.001
+    partPos:
+    - {x: 0, y: 0, z: 0}
+    - {x: 0.008339059, y: 0.0067611276, z: -0.36258897}
+    - {x: 0.0027472056, y: -0.0017202093, z: -0.5496086}
+    - {x: -0.08834973, y: -0.28532436, z: -0.552607}
+    partRot:
+    - {x: 0, y: 0, z: 0, w: 1.0000004}
+    - {x: -0.0029700308, y: -0.048972454, z: 0.032856036, w: 0.99825543}
+    - {x: -0.010192201, y: -0.010537453, z: -0.009864897, w: 0.99984413}
+    - {x: 0.005656935, y: 0.030415922, z: -0.0121736, w: 0.99944746}
+    partBounds:
+    - m_Center: {x: -0.002254421, y: 0.024674393, z: -0.16059566}
+      m_Extent: {x: 0.021352492, y: 0.104615405, z: 0.5711102}
+    - m_Center: {x: 0.032470595, y: 0.09294222, z: -0.3916184}
+      m_Extent: {x: 0.018662829, y: 0.014946476, z: 0.0072202384}
+    - m_Center: {x: -0.0033492316, y: 0.094632074, z: -0.32547367}
+      m_Extent: {x: 0.017417125, y: 0.016286671, z: 0.08959526}
+    - m_Center: {x: -0.09121108, y: -0.13328506, z: -0.55964553}
+      m_Extent: {x: 0.0057172626, y: 0.023265943, z: 0.029297113}
+    body:
+      m_Center: {x: -0.002254421, y: 0.024674393, z: -0.16059566}
+      m_Extent: {x: 0.021352492, y: 0.104615405, z: 0.5711102}
+    sight: {x: -0.002254421, y: 0.12004383, z: -0.046719503}
+    sightFront: {x: -0.002254421, y: 0.12928979, z: 0.3821288}
+    muzzle: {x: -0.002257018, y: 0.115906134, z: 0.41051453}
+    stock: {x: -0.0022543417, y: -0.01578148, z: -0.73170584}
+    port: {x: -0.002254421, y: 0.12004383, z: -0.3065487}
+  - key: MP40
+    main: Weapon_handle
+    rh: {x: -0.0015785949, y: 0.08668597, z: -0.11385101}
+    lh: {x: -0.11059273, y: 0.10512373, z: 0.13181701}
+    head: {x: -0.18761247, y: 0.24260977, z: -0.34420162}
+    rhRot: {x: 0.053245313, y: -0.62472475, z: -0.7756086, w: 0.0729089}
+    lhRot: {x: 0.16248721, y: 0.042727787, z: -0.70758384, w: 0.6863654}
+    parts:
+    - Weapon_handle
+    - Weapon_handle.002
+    - Weapon_handle.001
+    partPos:
+    - {x: 0, y: 0, z: 0}
+    - {x: -0.0005382469, y: 0.0050216415, z: 0.15501882}
+    - {x: 0.00094799476, y: -0.069897756, z: 0.2738809}
+    partRot:
+    - {x: 0, y: 0, z: 0, w: 1.0000002}
+    - {x: -0.00000026847536, y: 0.000000059227137, z: -0.00000014897816, w: 1.0000002}
+    - {x: -0.00000006133236, y: 0.00000040410953, z: -0.00000032488836, w: 1.0000004}
+    partBounds:
+    - m_Center: {x: -0.010192953, y: 0.10452428, z: 0.12323481}
+      m_Extent: {x: 0.025130033, y: 0.09854491, z: 0.40968174}
+    - m_Center: {x: -0.03222692, y: 0.16629472, z: 0.15472206}
+      m_Extent: {x: 0.02016449, y: 0.0085086, z: 0.008508474}
+    - m_Center: {x: -0.0108783385, y: 0.044857204, z: 0.27314407}
+      m_Extent: {x: 0.009000207, y: 0.12771529, z: 0.018139899}
+    body:
+      m_Center: {x: -0.010192953, y: 0.10452428, z: 0.12323481}
+      m_Extent: {x: 0.025130033, y: 0.09854491, z: 0.40968174}
+    sight: {x: -0.010192953, y: 0.19229071, z: 0.120647766}
+    sightFront: {x: -0.010192953, y: 0.20306918, z: 0.50618315}
+    muzzle: {x: -0.010107333, y: 0.18329072, z: 0.53291655}
+    stock: {x: -0.010183537, y: 0.121474944, z: -0.28644693}
+    port: {x: -0.010192953, y: 0.19229071, z: 0.046148986}
+  - key: MG42
+    main: Weapon_handle
+    rh: {x: 0.0062637124, y: 0.09773664, z: -0.049777247}
+    lh: {x: -0.07163175, y: 0.030476307, z: 0.091781735}
+    head: {x: -0.073628284, y: 0.17670791, z: -0.48153728}
+    rhRot: {x: 0.05324527, y: -0.6247246, z: -0.77560854, w: 0.07290896}
+    lhRot: {x: 0.015094061, y: 0.35912344, z: 0.60241497, w: -0.7126703}
+    parts:
+    - Weapon_handle.001
+    - Weapon_handle
+    partPos:
+    - {x: -0.110522375, y: -0.12973738, z: 0.04281738}
+    - {x: 0, y: 0, z: 0}
+    partRot:
+    - {x: 0.00000023588974, y: 0.0000005073258, z: 0.00000010511341, w: 1.0000001}
+    - {x: 0, y: 0, z: 0, w: 1.0000001}
+    partBounds:
+    - m_Center: {x: -0.09705082, y: 0.122992225, z: 0.05295115}
+      m_Extent: {x: 0.06259487, y: 0.057140194, z: 0.063588984}
+    - m_Center: {x: -0.008834664, y: 0.07017999, z: 0.21183628}
+      m_Extent: {x: 0.034145765, y: 0.10858419, z: 0.64444536}
+    body:
+      m_Center: {x: -0.008834664, y: 0.07017999, z: 0.21183628}
+      m_Extent: {x: 0.034145765, y: 0.10858419, z: 0.64444536}
+    sight: {x: -0.008834664, y: 0.17876418, z: 0.21433991}
+    sightFront: {x: -0.008834664, y: 0.12762499, z: 0.8052251}
+    muzzle: {x: -0.010047246, y: 0.104570165, z: 0.85628164}
+    stock: {x: -0.008834551, y: 0.11575601, z: -0.43260908}
+    port: {x: -0.008834664, y: 0.17876418, z: 0.11022275}
+  - key: Luger
+    main: Weapon_handle.003
+    rh: {x: 0.006280129, y: 0.10121689, z: -0.11044197}
+    lh: {x: -0.041828208, y: -0.016012054, z: -0.05739003}
+    head: {x: -0.055345096, y: 0.21054274, z: -0.37418914}
+    rhRot: {x: 0.05324557, y: -0.6247248, z: -0.7756086, w: 0.072909236}
+    lhRot: {x: 0.14501926, y: -0.21327716, z: -0.5039196, w: 0.8243467}
+    parts:
+    - Weapon_handle
+    - Weapon_handle.003
+    - Weapon_handle.004
+    - Weapon_handle.001
+    - Weapon_handle.002
+    partPos:
+    - {x: 0.0000164109, y: 0.0034803555, z: -0.060664743}
+    - {x: 0, y: 0, z: 0}
+    - {x: 0.00014106286, y: -0.029272243, z: -0.04765777}
+    - {x: -0.00024082603, y: 0.018561022, z: -0.01643263}
+    - {x: -0.00028096457, y: 0.0077152667, z: 0.017720614}
+    partRot:
+    - {x: -0.00000023824063, y: 0.00000007679425, z: -0.000000103107304, w: 1.0000002}
+    - {x: 0, y: 0, z: 0, w: 1.0000002}
+    - {x: -0.0000000898302, y: -0.000000043109548, z: -0.00000007530961, w: 1.0000002}
+    - {x: 4.2875016e-11, y: 0.00000012682015, z: 0.0000003895387, w: 1.0000002}
+    - {x: -0.00000018013174, y: -0.00000027190785, z: 0.00000021873683, w: 1.0000001}
+    partBounds:
+    - m_Center: {x: 0.0027963044, y: 0.16719615, z: -0.06061513}
+      m_Extent: {x: 0.014697161, y: 0.009199321, z: 0.022584312}
+    - m_Center: {x: 0.0027798796, y: 0.093555085, z: 0.024095654}
+      m_Extent: {x: 0.017395245, y: 0.07832003, z: 0.12828939}
+    - m_Center: {x: 0.0029283492, y: 0.08584199, z: -0.04979091}
+      m_Extent: {x: 0.011054651, y: 0.06981301, z: 0.048241757}
+    - m_Center: {x: 0.0025390312, y: 0.16480973, z: -0.018352764}
+      m_Extent: {x: 0.008583663, y: 0.0050745606, z: 0.02454036}
+    - m_Center: {x: 0.0024989224, y: 0.16685, z: 0.01950612}
+      m_Extent: {x: 0.008583657, y: 0.0031254292, z: 0.018800907}
+    body:
+      m_Center: {x: 0.0027798796, y: 0.093555085, z: 0.024095654}
+      m_Extent: {x: 0.017395245, y: 0.07832003, z: 0.12828939}
+    sight: {x: 0.0027798796, y: 0.17639548, z: -0.047776826}
+    sightFront: {x: 0.0027798796, y: 0.1718751, z: 0.14307626}
+    muzzle: {x: 0.0027797457, y: 0.15927902, z: 0.15238504}
+    stock: {x: 0.002779846, y: 0.12734543, z: -0.10419373}
+    port: {x: 0.0027798796, y: 0.17639548, z: 0.04955803}
+  - key: Panzerschreck
+    main: Weapon_handle
+    rh: {x: 0.031071385, y: -0.00069007557, z: -0.085572}
+    lh: {x: -0.06366821, y: -0.005563803, z: 0.18334179}
+    head: {x: -0.11280032, y: 0.14881895, z: -0.40277788}
+    rhRot: {x: 0.036112603, y: -0.75223583, z: -0.652424, w: 0.08473671}
+    lhRot: {x: -0.20175618, y: -0.46908066, z: -0.5867065, w: 0.62851685}
+    parts:
+    - Weapon_handle
+    - Weapon_handle.003
+    partPos:
+    - {x: 0, y: 0, z: 0}
+    - {x: -0.1967138, y: -0.13714468, z: -0.2010991}
+    partRot:
+    - {x: 0, y: 0, z: 0, w: 1.0000001}
+    - {x: -0.17773412, y: 0.004821795, z: 0.00066196587, w: 0.98406667}
+    partBounds:
+    - m_Center: {x: -0.011462182, y: 0.16296943, z: -0.04087174}
+      m_Extent: {x: 0.15179816, y: 0.21512659, z: 0.72833073}
+    - m_Center: {x: -0.16985893, y: -0.08853022, z: -0.16984375}
+      m_Extent: {x: 0.03191039, y: 0.098611586, z: 0.22052656}
+    body:
+      m_Center: {x: -0.011462182, y: 0.16296943, z: -0.04087174}
+      m_Extent: {x: 0.15179816, y: 0.21512659, z: 0.72833073}
+    sight: {x: -0.011462182, y: 0.2512835, z: 0.32417414}
+    sightFront: {x: -0.011462182, y: 0.26112327, z: 0.6825427}
+    muzzle: {x: 0.028490651, y: 0.19802375, z: 0.687459}
+    stock: {x: 0.028025176, y: 0.13700299, z: -0.7692025}
+    port: {x: -0.011462182, y: 0.2512835, z: 0.074428}
+  - key: STG44
+    main: Weapon_handle
+    rh: {x: 0.014028548, y: 0.13685456, z: -0.09395004}
+    lh: {x: -0.07883115, y: 0.18343742, z: 0.28497276}
+    head: {x: -0.11228731, y: 0.30057487, z: -0.30099744}
+    rhRot: {x: 0.053245746, y: -0.6247245, z: -0.7756086, w: 0.07290886}
+    lhRot: {x: 0.0938921, y: -0.22266021, z: -0.7990682, w: 0.5505425}
+    parts:
+    - Weapon_handle
+    - Weapon_handle.001
+    partPos:
+    - {x: 0, y: 0, z: 0}
+    - {x: -0.00019790571, y: 0.06742156, z: 0.17362359}
+    partRot:
+    - {x: 0, y: 0, z: 0, w: 1.0000002}
+    - {x: 0.00000017870231, y: -0.00000003009635, z: -0.0000002632674, w: 1.0000004}
+    partBounds:
+    - m_Center: {x: 0.010453708, y: 0.16984624, z: 0.15449113}
+      m_Extent: {x: 0.022815676, y: 0.112113416, z: 0.49672008}
+    - m_Center: {x: 0.010175467, y: 0.080131665, z: 0.19740875}
+      m_Extent: {x: 0.014261398, y: 0.13763118, z: 0.05302696}
+    body:
+      m_Center: {x: 0.010453708, y: 0.16984624, z: 0.15449113}
+      m_Extent: {x: 0.022815676, y: 0.112113416, z: 0.49672008}
+    sight: {x: 0.010453708, y: 0.26908743, z: 0.17197497}
+    sightFront: {x: 0.010453708, y: 0.28195965, z: 0.6145939}
+    muzzle: {x: 0.0104115475, y: 0.25164115, z: 0.6512112}
+    stock: {x: 0.0104535455, y: 0.15413453, z: -0.34222895}
+    port: {x: 0.010453708, y: 0.26908743, z: 0.066049956}
+  roundPrefab: {fileID: 1956485895733716, guid: ae4406b540dfdf646bad05989746a423, type: 3}
+  caseK98: {fileID: 1956485895733716, guid: ae4406b540dfdf646bad05989746a423, type: 3}
+  casePistol: {fileID: 1989874318754438, guid: 3543da0c1c9019849979f6eedd0209e9, type: 3}
+  caseMG: {fileID: 1302883245805236, guid: 054335e07c04b8d458511eab58e8980b, type: 3}
+  rocketPrefab: {fileID: 1335651669053632, guid: 349d9ea0a71fe9847928b578fe6cbeb9, type: 3}
+  useModels: 1
+  teams: 0100y
+  models:
+  - name: SS_A
+    prefab: {fileID: 1281914457622604, guid: 4bc1a69d8733fc049baca07c8bee0cde, type: 3}
+    clips:
+    - {fileID: 7400028, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400036, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400006, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400038, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400002, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400026, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400046, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400042, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400022, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400034, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400010, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400012, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400044, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400016, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400014, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400030, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400032, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400040, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400008, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400004, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400024, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400020, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    - {fileID: 7400018, guid: 3ae5a5e68b34a284d9bc013892d8bd25, type: 3}
+    bareSkin: {fileID: 2100000, guid: 98e6662281a0a2a459f8c137625e697f, type: 2}
+  - name: SS_B
+    prefab: {fileID: 1440608434540238, guid: 50bb8ddc112af9940abeabee2a8d9935, type: 3}
+    clips:
+    - {fileID: 7400012, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400002, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400008, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400030, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400046, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400040, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400028, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400004, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400018, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400010, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400006, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400036, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400042, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400032, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400014, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400024, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400016, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400026, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400038, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400020, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400034, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400022, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    - {fileID: 7400044, guid: d4a1a4a4b01e5f74b898ca905ae50664, type: 3}
+    bareSkin: {fileID: 2100000, guid: 37e2895a49cb3374f94383b847c1ffe2, type: 2}
+  - name: Wehrmacht_A
+    prefab: {fileID: 1887222638721492, guid: efa840fd7e7ebba42b0fa611ba1eef80, type: 3}
+    clips:
+    - {fileID: 7400082, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400080, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400078, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400074, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400086, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400084, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400076, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400066, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400062, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400064, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400094, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400090, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400056, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400060, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400088, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400092, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400058, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400054, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400002, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400070, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400068, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400072, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    - {fileID: 7400052, guid: db79cbc10dddf6f4fb79f5cb6c5fa7fb, type: 3}
+    bareSkin: {fileID: 2100000, guid: 75da9455682b1fd43be790b44f94a5af, type: 2}
+  - name: Wehrmacht_B
+    prefab: {fileID: 1700052175604710, guid: 6fd37bc403f0bd54588916227b3cd53d, type: 3}
+    clips:
+    - {fileID: 7400096, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400112, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400108, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400130, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400102, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400136, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400126, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400098, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400122, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400114, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400140, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400128, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400132, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400110, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400134, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400100, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400138, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400104, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400106, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400118, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400116, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400120, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    - {fileID: 7400124, guid: 86cecc50967b26d4693b7e59e3815120, type: 3}
+    bareSkin: {fileID: 2100000, guid: 1ec53c6d5e2b3014ebb1bc5513a27770, type: 2}
+  - name: Wehrmacht_C
+    prefab: {fileID: 1028210966636650, guid: dd241e6708f6ae94aa577e722c70a485, type: 3}
+    clips:
+    - {fileID: 7400122, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400114, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400130, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400108, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400106, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400132, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400102, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400134, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400140, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400096, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400112, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400138, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400124, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400116, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400120, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400136, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400098, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400104, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400126, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400100, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400128, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400118, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    - {fileID: 7400110, guid: 274b23fcb2ff684478ea8759cea1e317, type: 3}
+    bareSkin: {fileID: 2100000, guid: e5e5f98f98435b74c9664c939283f414, type: 2}
+  teamModels: 020000000300000004000000i
+  controller: {fileID: 9100000, guid: c5549b3dbf66ffb428fbaa2b9bae942c, type: 2}

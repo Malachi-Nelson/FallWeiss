@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: d95c4e6088e02df4791ed03e45f30a36
+timeCreated: 1515290793
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Demo_scene/Test_stuff_for_the_scene/Test_tree_leafes.mat
+  uploadId: 222933

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 0fac1c1e8dbc98f4bac9bc0a61b5ccf1
+timeCreated: 1512092762
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 31900000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/SchutzStaffel_A_hands.mask
+  uploadId: 222933

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: c57d989921c91e145ac3b48e44c236d3
+timeCreated: 1512067340
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/Wehrmacht_C/Materials/Wehrmacht_C_hat.mat
+  uploadId: 222933

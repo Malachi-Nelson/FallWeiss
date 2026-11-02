@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: ac9a897cc545ebb4cab6c71ad38791f0
+timeCreated: 1515290719
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Demo_scene/Test_stuff_for_the_scene/Test_tree_prefab.prefab
+  uploadId: 222933

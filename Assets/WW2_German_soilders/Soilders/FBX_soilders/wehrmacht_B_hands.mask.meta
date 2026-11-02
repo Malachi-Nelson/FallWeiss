@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: b174d25ae7fdaa3459125ad2dc5205fc
+timeCreated: 1512082747
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 31900000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/wehrmacht_B_hands.mask
+  uploadId: 222933

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 6fd37bc403f0bd54588916227b3cd53d
+timeCreated: 1515375097
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 100100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/Wehrmacht_B/wehrmacht_b_prefab.prefab
+  uploadId: 222933

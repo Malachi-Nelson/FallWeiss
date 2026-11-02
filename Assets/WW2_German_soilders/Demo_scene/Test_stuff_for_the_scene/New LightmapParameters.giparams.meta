@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: c72cf24ae7147034caacbcb5737ba352
+timeCreated: 1515292193
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 111300000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Demo_scene/Test_stuff_for_the_scene/New LightmapParameters.giparams
+  uploadId: 222933

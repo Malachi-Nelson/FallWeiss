@@ -1,0 +1,5 @@
+{
+    "name": "FallWeiss.Editor",
+    "references": ["FallWeiss"],
+    "includePlatforms": ["Editor"]
+}

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: b552de33444dcde438cd5daf501e0496
+timeCreated: 1512066274
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Bullet_prefabs/Materials/MP40_bulletCase.mat
+  uploadId: 222933

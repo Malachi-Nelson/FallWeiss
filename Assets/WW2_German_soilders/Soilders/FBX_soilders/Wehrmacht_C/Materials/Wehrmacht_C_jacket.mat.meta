@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 55029a46dacb788479e7a4e0d9c2bfbd
+timeCreated: 1512067345
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/Wehrmacht_C/Materials/Wehrmacht_C_jacket.mat
+  uploadId: 222933

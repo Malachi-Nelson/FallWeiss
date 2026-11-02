@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 53eaefaabba24f8499386024d21d8159
+timeCreated: 1512092762
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 31900000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/Soilder_merge_hands_wehrrmacht_B.mask
+  uploadId: 222933

@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: bafc084592e89a44f984411d0f15a6bc
+timeCreated: 1512079748
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 9100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/Wehrmacht_A/Wehrmacht_A.controller
+  uploadId: 222933

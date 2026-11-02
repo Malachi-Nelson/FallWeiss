@@ -1,0 +1,17 @@
+fileFormatVersion: 2
+guid: 6f9c41aa16a655f4ab1d3e5c0b741529
+timeCreated: 1515375251
+licenseType: Store
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 106450
+  packageName: POLYGON WW2 German Soilders
+  packageVersion: 1.0
+  assetPath: Assets/WW2_German_soilders/Soilders/FBX_soilders/Wehrmacht_B/Materials/Jacket.mat
+  uploadId: 222933
