@@ -539,7 +539,7 @@ namespace FallWeiss
             foreach (var u in units) u.SyncTransform(dt);
             if (player != null && player.alive) { resT -= dt; if (resT <= 0) { resT = 5; Resupply(player); } }
             streakT -= dt; if (streakT <= 0) streak = 0;
-            UpdateGrenades(dt); UpdateSmoke(dt); UpdatePickups(dt); UpdatePlanes(dt); UpdateShells(); UpdateMarkers(dt);
+            audio.Tick(); UpdateGrenades(dt); UpdateSmoke(dt); UpdatePickups(dt); UpdatePlanes(dt); UpdateShells(); UpdateMarkers(dt);
             if (range == null) { Director(dt); SecureTick(dt); UpdateCapture(dt, false); SpawnGuard(dt); Raids(dt); AiGrenades(dt); } else range.Update(dt, kb); Spotting(dt); UpdateFires(dt); UpdateShipAndSky(dt); World.Tick(dt); Burning(dt); UpdateConvoy(dt); UpdateBeams(dt); UpdatePaths(); UpdatePings(dt); szT -= dt; if (szT <= 0) { szT = .5f; UpdateSpawnZones(); } shake = Mathf.Max(0, shake - dt * 3);
             foreach (var b in World.blades) if (b) b.Rotate(0, 0, -dt * 23, Space.Self);
             fx.Update(dt, cam); vis.Update(dt, t, !rts); vis.Suppression(player != null && player.alive && !rts ? player.supp : 0); UpdateInteriorLight();
@@ -974,10 +974,12 @@ namespace FallWeiss
         {
             var w = player.Weapon; string kind = w == null ? "none" : w.vm;
             if (player.sv && w != null && !w.melee) { if (vm) Destroy(vm.gameObject); vm = null; vmKind = ""; return; }   // POLYGON body/gun is the viewmodel
-            if (vm && vmKind == player.team + kind) { vm.gameObject.SetActive(true); return; }
-            if (vm) Destroy(vm.gameObject); vm = null; vmKind = player.team + kind;
-            if (w == null || kind == "none" || !ModelLib.Has("vm_" + player.team + "_" + kind)) return;
-            vm = ModelLib.Spawn("vm_" + player.team + "_" + kind, cam.transform, false).transform; vm.localPosition = Vector3.zero; vm.localRotation = Quaternion.identity;
+            // a weapon with its own viewmodel (vm_<team>_<id>, e.g. the Walther P38) uses it instead of its kind's (the Luger)
+            string vmName = w != null && ModelLib.Has("vm_" + player.team + "_" + w.id) ? "vm_" + player.team + "_" + w.id : "vm_" + player.team + "_" + kind;
+            if (vm && vmKind == vmName + "/" + (w != null ? w.id : "")) { vm.gameObject.SetActive(true); return; }
+            if (vm) Destroy(vm.gameObject); vm = null; vmKind = vmName + "/" + (w != null ? w.id : "");
+            if (w == null || kind == "none" || !ModelLib.Has(vmName)) return;
+            vm = ModelLib.Spawn(vmName, cam.transform, false).transform; vm.localPosition = Vector3.zero; vm.localRotation = Quaternion.identity;
             vmFist = null; MountPackViewModel(w); VmCollectParts();
             if (w.melee && vm.childCount > 0)
             {   // split the blade + grip + hand off the forearm onto a wrist pivot, so the blade can be held upright and swung
@@ -1110,6 +1112,11 @@ namespace FallWeiss
                 var target = tpPivot - f3 * dd + rgt * side + Vector3.up * up;
                 if (Physics.Linecast(tpPivot, target, out var hit, ~0, QueryTriggerInteraction.Ignore)) target = hit.point + (tpPivot - target).normalized * .3f;
                 cam.transform.position = target; cam.transform.rotation = Quaternion.Euler((-pitch - recoil * .4f - swy) * Mathf.Rad2Deg, (yaw + swx) * Mathf.Rad2Deg, 0);
+                if (debugOrbit.HasValue)
+                {   // test hook (dbg orbit <deg> <dist>): look at the player's own model from any side
+                    float oy = yaw + debugOrbit.Value * Mathf.Deg2Rad; var c = new Vector3(u.x, u.y + 1.35f, u.z);
+                    cam.transform.position = c + new Vector3(Mathf.Sin(oy), .12f, Mathf.Cos(oy)) * debugOrbitD; cam.transform.rotation = Quaternion.LookRotation(c - cam.transform.position);
+                }
             }
             else
             {
@@ -1165,7 +1172,7 @@ namespace FallWeiss
         /// POLYGON pack gun in first person (Kar98k, MP40 for the MP 38, Luger): replaces the v4 gun mesh, rear and front sight
         /// tops on the eye line (so ADS looks straight down the pack's own sights), the pack grip where the v4 wrist is; its bolt,
         /// magazine and toggle take the v4 part names so the same animations drive them. Casings and flashes use its port / muzzle.
-        Vector3? vmMuzzleLocal;
+        Vector3? vmMuzzleLocal; float? debugOrbit; float debugOrbitD = 2.2f;
         void MountPackViewModel(WeaponDef w)
         {
             vmMuzzleLocal = null; if (!vm || vm.childCount == 0 || w == null) return;
@@ -1414,7 +1421,7 @@ namespace FallWeiss
             var (d, hit, head) = CastRay(cam.transform.position, cam.transform.forward, w.reach + .3f, u.team);
             if (hit == null) foreach (var e in units) { if (!e.alive || e.team == u.team) continue; var to = e.Chest - cam.transform.position; if (to.magnitude < w.reach && Vector3.Angle(cam.transform.forward, to) < 25) { hit = e; break; } }
             if (hit != null && !hit.def.armor) Combat.Damage(this, hit, w.dmg, false, false, u);
-            audio.Shot("rifle", u.Eye, .4f);
+            audio.Shot("melee", u.Eye, .4f);   // swing swish (was the generic "rifle" key, which now resolves to a real gunshot)
         }
 
         void ThrowGrenade(Unit u)
@@ -1819,6 +1826,10 @@ namespace FallWeiss
                         if (best == null) return "no target in LOS"; var v = best.Chest - o; yaw = Mathf.Atan2(v.x, v.z); pitch = Mathf.Atan2(v.y, FU.Hyp(v.x, v.z)); return $"aim {best.type} d={bd:0}";
                     }
                 case "god": if (player != null) { player.max = player.hp = 5000; } return "god";
+                case "tp": if (player == null) return "no"; tp = w.Length < 2 || w[1] != "0"; player.SetRenderers(tp); if (vm) vm.gameObject.SetActive(!tp); return "tp " + tp;
+                case "orbit":
+                    if (w.Length < 2 || w[1] == "off") { debugOrbit = null; return "orbit off"; }
+                    debugOrbit = float.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture); debugOrbitD = w.Length > 2 ? float.Parse(w[2], System.Globalization.CultureInfo.InvariantCulture) : 2.2f; return "orbit " + debugOrbit;
                 case "ads": debugAds = w.Length > 1 ? float.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture) : -1; return "ads " + debugAds;
                 case "wep":
                     {   // test hook: switch the player to weapon id w[1] (works without keyboard focus)
