@@ -163,7 +163,7 @@ namespace FallWeiss
             cam.nearClipPlane = .05f; cam.farClipPlane = 1400; cam.fieldOfView = 70;
             sun = FindObjectsByType<Light>(FindObjectsInactive.Exclude).FirstOrDefault(l => l.type == LightType.Directional);
             if (!sun) { var lg = new GameObject("Sun"); sun = lg.AddComponent<Light>(); sun.type = LightType.Directional; }
-            fx.Init(); audio.Init(); audio.listener = cam.transform; vis.Init(cam, sun);
+            fx.Init(); audio.Init(); audio.listener = cam.transform; if (cam.GetComponent<AudioListener>() && !cam.GetComponent<MasterLimiter>()) cam.gameObject.AddComponent<MasterLimiter>(); vis.Init(cam, sun);
             EnterMenu();
         }
 
@@ -978,7 +978,7 @@ namespace FallWeiss
             if (vm) Destroy(vm.gameObject); vm = null; vmKind = player.team + kind;
             if (w == null || kind == "none" || !ModelLib.Has("vm_" + player.team + "_" + kind)) return;
             vm = ModelLib.Spawn("vm_" + player.team + "_" + kind, cam.transform, false).transform; vm.localPosition = Vector3.zero; vm.localRotation = Quaternion.identity;
-            vmFist = null; VmCollectParts();
+            vmFist = null; MountPackViewModel(w); VmCollectParts();
             if (w.melee && vm.childCount > 0)
             {   // split the blade + grip + hand off the forearm onto a wrist pivot, so the blade can be held upright and swung
                 var box = vm.GetChild(0); float gz = kind == "sabre" ? .24f : .28f;
@@ -1162,6 +1162,42 @@ namespace FallWeiss
             foreach (var n in new[] { "clip", "round", "follower" }) if (vmParts.TryGetValue(n, out var t)) t.gameObject.SetActive(false);
         }
         Transform VP(string n) => vmParts.TryGetValue(n, out var t) ? t : null;
+        /// POLYGON pack gun in first person (Kar98k, MP40 for the MP 38, Luger): replaces the v4 gun mesh, rear and front sight
+        /// tops on the eye line (so ADS looks straight down the pack's own sights), the pack grip where the v4 wrist is; its bolt,
+        /// magazine and toggle take the v4 part names so the same animations drive them. Casings and flashes use its port / muzzle.
+        Vector3? vmMuzzleLocal;
+        void MountPackViewModel(WeaponDef w)
+        {
+            vmMuzzleLocal = null; if (!vm || vm.childCount == 0 || w == null) return;
+            var g = PackGuns.Get(PackGuns.KeyFor(w.id)); if (g == null) return;
+            var box = vm.GetChild(0); var rig = g.rig; var gr = ModelLib.Find(box, "grip_r"); if (!gr) return;
+            PackGuns.Blank(ModelLib.Find(box, "gunmesh"));
+            foreach (var n in new[] { "bolt", "mag", "toggle", "chandle", "slide" }) { var t = ModelLib.Find(box, n); if (t) { PackGuns.Blank(t); t.name = "v4_" + n; } }
+            var R = Quaternion.FromToRotation((rig.sightFront - rig.sight).normalized, Vector3.forward);
+            var wrist = gr.localPosition + (w.vm == "pistol" ? new Vector3(.006f, -.008f, -.05f) : new Vector3(.008f, -.017f, -.046f));   // fist centre -> wrist
+            // cheek weld: eye ~10 cm ahead of the butt (rifles / SMG), pistol held out at arm's length; the v4 arms follow the grip
+            float relief = w.vm == "pistol" ? .42f : Mathf.Max(.18f, rig.sight.z - rig.stock.z - .10f);
+            var pos = new Vector3(0, 0, relief) - R * rig.sight;
+            var root = PackGuns.Spawn(g, box, false); root.localRotation = R; root.localPosition = pos;
+            var arms = ModelLib.Find(box, "arms"); if (arms) arms.localPosition += pos + R * rig.rh - wrist;
+            var port = ModelLib.Find(box, "port"); if (port) port.localPosition = pos + R * rig.port;
+            vmMuzzleLocal = pos + R * rig.muzzle;
+            Transform Re(Transform part, Vector3 pivot, string name)
+            {   // new pivot (gun frame) for an animated part, named as the v4 part so VmAnim drives it
+                var p = new GameObject(name).transform; p.SetParent(root, false); p.localPosition = pivot; part.SetParent(p, true); return p;
+            }
+            Transform Bone(string b) { for (int i = 0; i < root.childCount; i++) if (root.GetChild(i).name == b) return root.GetChild(i); return null; }
+            PackGuns.Part PartOf(string b) { foreach (var p in g.parts) if (p.bone == b) return p; return null; }
+            if (g.key == "K98") { var b = Bone("Weapon_handle"); var pp = PartOf("Weapon_handle"); if (b && pp != null) Re(b, new Vector3(rig.muzzle.x, rig.muzzle.y, pp.b.center.z), "bolt"); }   // turns about the bore
+            if (g.key == "MP40") { var b = Bone("Weapon_handle.001"); var pp = PartOf("Weapon_handle.001"); if (b && pp != null) Re(b, pp.b.center, "mag"); }
+            if (g.key == "Luger")
+            {   // magazine = lowest moving part, toggle = highest (breaks up about its rear pin)
+                PackGuns.Part lo = null, hi = null;
+                foreach (var p in g.parts) { if (p.bone == rig.main) continue; if (lo == null || p.b.center.y < lo.b.center.y) lo = p; if (hi == null || p.b.center.y > hi.b.center.y) hi = p; }
+                if (lo != null && Bone(lo.bone)) Re(Bone(lo.bone), lo.b.center, "mag");
+                if (hi != null && hi != lo && Bone(hi.bone)) Re(Bone(hi.bone), new Vector3(hi.b.center.x, hi.b.min.y, hi.b.min.z), "toggle");
+            }
+        }
         void VmSet(string n, Vector3 dp, Quaternion dq, bool show = true)
         {
             var t = VP(n); if (!t) return; var b = vmBase[t]; t.localPosition = b.position + dp; t.localRotation = b.rotation * dq;
@@ -1309,7 +1345,7 @@ namespace FallWeiss
             var (dist, hitU, head) = CastRay(o, dir, range, u.team);
             Vector3 muzzle;
             if (tp) { var A = o + dir * dist; var d2 = (A - tpPivot); float L = d2.magnitude; dir = d2 / Mathf.Max(.01f, L); o = tpPivot + dir * .6f; (dist, hitU, head) = CastRay(o, dir, Mathf.Max(2, L + 6), u.team); muzzle = !u.sv && u.muzzleT ? u.muzzleT.position : tpPivot + dir * 1.3f; }
-            else muzzle = cannon && tankGunTip && tankVm.gameObject.activeSelf ? tankGunTip.position : u.sv && u.sv.MuzzleOnScreen(cam).HasValue ? u.sv.MuzzleOnScreen(cam).Value : vm && vm.gameObject.activeSelf ? vm.TransformPoint(VmMuzzle(w.vm)) : o + cam.transform.forward * .9f;
+            else muzzle = cannon && tankGunTip && tankVm.gameObject.activeSelf ? tankGunTip.position : u.sv && u.sv.MuzzleOnScreen(cam).HasValue ? u.sv.MuzzleOnScreen(cam).Value : vm && vm.gameObject.activeSelf ? vm.TransformPoint(vmMuzzleLocal ?? VmMuzzle(w.vm)) : o + cam.transform.forward * .9f;
             if (tp && u.sv && u.sv.MuzzleWorld.HasValue && !cannon) muzzle = u.sv.MuzzleWorld.Value;   // third person: straight from the model's barrel
             var end = o + dir * dist;
             fx.Tracer(muzzle, end); fx.MuzzleFlash(muzzle, cannon ? cam.transform.forward : (end - muzzle), cannon ? 1.4f : w.vm == "pistol" ? .16f : w.mg ? .32f : .26f); audio.Shot(cannon ? "cannon" : w.snd, o);
@@ -1784,6 +1820,21 @@ namespace FallWeiss
                     }
                 case "god": if (player != null) { player.max = player.hp = 5000; } return "god";
                 case "ads": debugAds = w.Length > 1 ? float.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture) : -1; return "ads " + debugAds;
+                case "wep":
+                    {   // test hook: switch the player to weapon id w[1] (works without keyboard focus)
+                        if (player == null || player.weps == null || w.Length < 2) return "no"; int i = System.Array.IndexOf(player.weps, w[1]); if (i < 0) return "not carried: " + string.Join(",", player.weps);
+                        player.SwitchWeapon(i); BuildViewModel(); return "weapon " + w[1];
+                    }
+                case "fire": if (player != null && player.Weapon != null && player.clip > 0) { PlayerFire(player, player.Weapon, player.stance); return "fired, clip " + player.clip; } return "no";
+                case "reload":
+                    {   // test hook: start a reload as [R] would (w[1] = "empty" first empties the magazine)
+                        var pw = player != null ? player.Weapon : null; if (pw == null || pw.clip <= 0) return "no";
+                        if (w.Length > 1 && w[1] == "empty") player.clip = 0; else if (player.clip >= pw.clip) player.clip = pw.clip - 1;
+                        bool bg = pw.vm == "rifle" || pw.vm == "sniper"; player.reloadStop = false;
+                        if (bg && (pw.scope || player.clip > 0)) { player.rkind = ReloadKind.Single; player.singlesActive = true; player.reload = player.reloadDur = .62f; }
+                        else { player.rkind = bg ? ReloadKind.Stripper : ReloadKind.Mag; player.reload = player.reloadDur = pw.reload; }
+                        return "reload " + player.rkind;
+                    }
                 case "heat": if (player != null) { player.heat = w.Length > 1 ? float.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture) : .97f; return "heat " + player.heat + " overheated=" + player.overheated + " barrelT=" + player.barrelT; } return "no player";
             }
             return "?";
@@ -1839,7 +1890,7 @@ namespace FallWeiss
                 c.m.position = new Vector3(x, World.H(x, z), z); c.m.rotation = Quaternion.Euler(0, Mathf.Atan2(c.dir.x, c.dir.y) * Mathf.Rad2Deg, 0);
                 if (vis)
                 {   // Opel Blitz 3.6 (1939): engine starts once the lorry is in sight; it labours when driving and drops to idle when parked
-                    if (!c.eng) c.eng = audio.Follow("truck", c.m, .6f, true, 6, 240, 0);
+                    if (!c.eng) c.eng = audio.Follow("truck", c.m, .6f, true, 6, 500, 0);
                     else if (!c.eng.isPlaying) c.eng.Play();
                     if (c.eng) { bool drive = c.wait <= 0 && c.s < stop; c.eng.pitch = Mathf.Lerp(c.eng.pitch, drive ? 1.12f : .86f, dt * 2); c.eng.volume = Mathf.Lerp(c.eng.volume, drive ? .6f : .32f, dt * 2); }
                 }

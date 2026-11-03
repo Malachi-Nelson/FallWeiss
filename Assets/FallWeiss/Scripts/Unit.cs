@@ -81,6 +81,7 @@ namespace FallWeiss
                 string v = Variant(); wpP = v == "mg" ? -.04f : v == "assault" ? (team == 0 ? -.08f : -.06f) : -.1f;
                 if (!AddModelHits(t)) { AddHitBox(upper, new Vector3(0, .5f, 0), new Vector3(.5f, .4f, .38f), HitZone.Chest); AddHitBox(upper, new Vector3(0, .14f, 0), new Vector3(.46f, .32f, .36f), HitZone.Stomach); AddHitBox(hip, new Vector3(0, -.45f, 0), new Vector3(.42f, .95f, .36f), HitZone.Leg); AddHead(headT, new Vector3(0, .12f, 0), .15f); }
                 muzzleT = ModelLib.Find(t, "muzzle");
+                if (muzzleT) PackGuns.MountThirdPerson(weaponT, muzzleT, ModelLib.Find(t, "breech"), ModelWeapon());   // POLYGON pack gun where the pack has this weapon
                 if (muzzleT) wpP = 0;   // v4 models: the gun is modelled where the hands hold it, so it must not tilt away from them
             }
             else
@@ -366,7 +367,7 @@ namespace FallWeiss
             if (!go) return;
             if (!eng)
             {
-                eng = kind == "tank" ? g.audio.Follow(team == 0 ? "tank_ger" : "tank_pol", go.transform, 1, true, 8, 320, 0) : g.audio.Follow("hooves", go.transform, 1, true, 4, 130, 0);
+                eng = kind == "tank" ? g.audio.Follow(team == 0 ? "tank_ger" : "tank_pol", go.transform, 1, true, 8, 600, 0) : g.audio.Follow("hooves", go.transform, 1, true, 4, 300, 0);
                 if (!eng) return; eng.volume = 0;
             }
             if (kind == "tank") { eng.pitch = Mathf.Lerp(eng.pitch, moving ? 1.05f : .8f, dt * 1.5f); eng.volume = Mathf.Lerp(eng.volume, moving ? .75f : .4f, dt * 2); }

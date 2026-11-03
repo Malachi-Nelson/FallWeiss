@@ -154,14 +154,16 @@ namespace FallWeiss
         /// Every key the game asks for. Specific keys fall back to a generic one (and finally the synthesised clip) when no recording is installed.
         static readonly string[] KEYS = { "rifle", "k98", "pistol", "p38", "smg", "mp40", "mg", "mg42", "browning", "bar", "cannon", "boom", "rumble", "drone", "siren", "pickup",
             "crack", "reload_bolt", "reload_mag", "reload_mg", "amb_wind", "amb_battle",
-            "truck", "plane", "tank_ger", "tank_pol", "hooves", "snort", "step", "pain", "glass", "debris", "radio" };
+            "truck", "plane", "tank_ger", "tank_pol", "hooves", "snort", "step", "pain", "glass", "debris", "radio",
+            "k98_far", "mp40_far", "mg42_far", "browning_far", "bar_far", "pistol_far", "cannon_far" };
         static readonly Dictionary<string, string> FALLBACK = new Dictionary<string, string>
         { ["k98"] = "rifle", ["p38"] = "pistol", ["pistol"] = "rifle", ["mp40"] = "smg", ["smg"] = "mg", ["mg42"] = "mg", ["browning"] = "mg", ["bar"] = "browning" };
-        /// Playback level per key for recorded clips (all are normalised to -1 dBFS by the pipeline).
+        /// Playback level per key for recorded clips. Gunshots are peak-normalised with the transient left intact (no limiting), so this
+        /// table is the gun mix at the muzzle: full-power 7.92 mm rifles and MGs loudest, 9 mm SMG and pistols a few dB under. Distance
+        /// does the rest (see Shot). The _far sets take the same level; the distance law already makes them quiet.
         static readonly Dictionary<string, float> LEVEL = new Dictionary<string, float>
-        // gun sets are cut from one recording family per weapon and matched to the same attack loudness, so these are the mix:
-        // full-power 7.92 mm (rifles and both MGs) share one level, 9 mm SMG and pistols sit a little lower
-        { ["k98"] = .78f, ["mg"] = .72f, ["mg42"] = .72f, ["browning"] = .72f, ["bar"] = .74f, ["mp40"] = .58f, ["smg"] = .58f, ["pistol"] = .58f, ["p38"] = .58f, ["crack"] = .5f,
+        { ["k98"] = 1f, ["rifle"] = 1f, ["mg"] = .9f, ["mg42"] = .9f, ["browning"] = .9f, ["bar"] = .95f, ["mp40"] = .8f, ["smg"] = .8f, ["pistol"] = .75f, ["p38"] = .75f,
+          ["k98_far"] = 1f, ["mg42_far"] = 1f, ["browning_far"] = 1f, ["bar_far"] = 1f, ["mp40_far"] = .9f, ["pistol_far"] = .85f, ["cannon_far"] = 1f, ["crack"] = .6f,
           ["reload_bolt"] = .45f, ["reload_mag"] = .45f, ["reload_mg"] = .45f, ["pickup"] = .5f, ["drone"] = .9f,
           ["step"] = .3f, ["radio"] = .3f, ["pain"] = .7f, ["glass"] = .65f, ["debris"] = .75f, ["snort"] = .55f };
         static readonly HashSet<string> FLAT = new HashSet<string> { "pickup", "reload_bolt", "reload_mag", "reload_mg", "step", "radio" };   // played at the listener, no 3D
@@ -180,10 +182,13 @@ namespace FallWeiss
             clips["rumble"] = Make("rumble", 3.2f, 70, 1.1f, 1f);   // distant artillery: all low end, long tail
             clips["drone"] = Drone();
             var root = new GameObject("Audio").transform;
-            for (int i = 0; i < 48; i++)   // recorded shots ring for ~1 s, so automatic fire needs more voices than the old clicks did
+            var flatCurve = AnimationCurve.Constant(0, 1, 1);
+            for (int i = 0; i < 64; i++)   // recorded shots ring for ~1 s and distant ones are scheduled late, so automatic fire needs plenty of voices
             {
                 var g = new GameObject("src"); g.transform.SetParent(root); var s = g.AddComponent<AudioSource>();
-                s.spatialBlend = 1; s.rolloffMode = AudioRolloffMode.Linear; s.minDistance = 4; s.maxDistance = 420; s.playOnAwake = false; s.dopplerLevel = 0; pool.Add(s);
+                // Shot() applies the distance law itself, so Unity's own rolloff is flat (it only pans)
+                s.spatialBlend = 1; s.rolloffMode = AudioRolloffMode.Custom; s.SetCustomCurve(AudioSourceCurveType.CustomRolloff, flatCurve); s.maxDistance = 5000;
+                s.playOnAwake = false; s.dopplerLevel = 0; pool.Add(s);
                 g.AddComponent<AudioLowPassFilter>().cutoffFrequency = 22000;   // distance muffling
             }
             Debug.Log($"[FallWeiss] SoundBank: {real.Count} recorded sound sets ({string.Join(", ", real.Keys)})");
@@ -253,7 +258,7 @@ namespace FallWeiss
         public AudioSource Follow(string k, Transform t, float vol = 1, bool loop = false, float minD = 25, float maxD = 650, float doppler = -1)
         {
             var c = Pick(k, out var used); if (c == null || !t) return null;
-            var s = t.gameObject.AddComponent<AudioSource>(); s.clip = c; s.loop = loop; s.spatialBlend = 1; s.rolloffMode = AudioRolloffMode.Linear;
+            var s = t.gameObject.AddComponent<AudioSource>(); s.clip = c; s.loop = loop; s.spatialBlend = 1; s.rolloffMode = AudioRolloffMode.Logarithmic;   // inverse distance: -6 dB per doubling past minD
             s.minDistance = minD; s.maxDistance = maxD; s.dopplerLevel = doppler < 0 ? .5f : doppler; s.playOnAwake = false; s.priority = 32;
             s.volume = (real.ContainsKey(used) && LEVEL.TryGetValue(used, out var lv) ? lv : .8f) * vol;
             if (loop) s.time = Random.Range(0, c.length * .95f);
@@ -265,16 +270,42 @@ namespace FallWeiss
             if (!s || !s.isPlaying) return; s.volume -= dt / Mathf.Max(.01f, secs) * Mathf.Max(s.volume, .05f) * 2.2f;
             if (s.volume <= .005f) s.Stop();
         }
+        // ---- distance model (real life, slightly compressed for a game) ----
+        // Full level within the reference distance, then inverse distance (-6 dB per doubling), as sound spreads in the open.
+        // Past FAR_AT metres a gun switches to its distant recording (less crack, more boom and echo); beyond ~80 m the air soaks up
+        // the highs; and sound arrives at 343 m/s, so distant fire is heard after the flash. Your own weapon is dry, 2D and full level.
+        static readonly HashSet<string> GUNS = new HashSet<string> { "rifle", "k98", "pistol", "p38", "smg", "mp40", "mg", "mg42", "browning", "bar" };
+        const float FAR_AT = 60, SPEED = 343;
+        static float Ref(string k) => GUNS.Contains(k) ? 6 : k == "boom" || k == "cannon" ? 15 : k == "rumble" ? 40 : k == "drone" ? 60 : k == "siren" ? 30 : k == "crack" ? 1.5f : 4;
+        bool FarOf(string k, out string far)
+        {
+            for (string key = k; key != null; key = FALLBACK.TryGetValue(key, out var f) ? f : null)
+                if (real.ContainsKey(key + "_far")) { far = key + "_far"; return true; }
+            far = null; return false;
+        }
+        AudioSource Voice()
+        {   // a free voice if there is one, so a scheduled or ringing sound is not cut off; otherwise the oldest
+            for (int i = 0; i < pool.Count; i++) { var v = pool[(next + i) % pool.Count]; if (!v.isPlaying) { next += i + 1; return v; } }
+            return pool[next++ % pool.Count];
+        }
         public void Shot(string k, Vector3 p, float vol = 1)
         {
-            var c = Pick(k, out var used); if (c == null) return;
-            float d = listener ? (listener.position - p).magnitude : 0; if (d > 420) return;
-            bool rec = real.ContainsKey(used), flat = FLAT.Contains(used);
-            var s = pool[next++ % pool.Count]; s.transform.position = flat && listener ? listener.position : p;
+            float d = listener ? (listener.position - p).magnitude : 0;
+            bool own = d < 2.5f;                                                       // your own weapon, or a sound at your head
+            string want = !own && d > FAR_AT && FarOf(k, out var fk) ? fk : k;
+            var c = Pick(want, out var used); if (c == null) return;
+            bool rec = real.ContainsKey(used), flat = own || FLAT.Contains(used);
+            string baseKey = used.EndsWith("_far") ? used.Substring(0, used.Length - 4) : used;
+            float gain = flat ? 1 : Mathf.Min(1, Ref(baseKey) / Mathf.Max(d, .01f));
+            if (gain < .008f) return;                                                  // under -42 dB: lost in the battle
+            var s = Voice(); s.transform.position = flat && listener ? listener.position : p;
             s.pitch = used == "siren" || used == "pickup" ? 1 : rec ? FU.Rand(.98f, 1.02f) : FU.Rand(.95f, 1.05f);   // small spread only: the same gun must sound like itself
-            s.volume = (rec ? (LEVEL.TryGetValue(used, out var lv) ? lv : .8f) : used == "mg" ? .5f : .8f) * vol; s.spatialBlend = flat ? 0 : 1;
-            var lp = s.GetComponent<AudioLowPassFilter>(); if (lp) lp.cutoffFrequency = flat ? 22000 : Mathf.Lerp(22000, 1800, Mathf.Clamp01((d - 40) / 300f));   // far fire loses its crack
-            s.PlayOneShot(c);
+            s.volume = (rec ? (LEVEL.TryGetValue(used, out var lv) ? lv : .8f) : used == "mg" ? .5f : .8f) * vol * gain; s.spatialBlend = flat ? 0 : 1;
+            s.priority = own ? 0 : (int)Mathf.Lerp(40, 230, Mathf.Clamp01(d / 600));  // near sounds win when voices run short
+            var lp = s.GetComponent<AudioLowPassFilter>(); if (lp) lp.cutoffFrequency = flat || d < 80 ? 22000 : Mathf.Max(2500, 22000 * Mathf.Pow(80 / d, .8f));
+            float delay = flat ? 0 : d / SPEED;
+            if (delay < .05f) s.PlayOneShot(c);
+            else { s.Stop(); s.clip = c; s.PlayScheduled(AudioSettings.dspTime + delay); }
         }
     }
 }
