@@ -8,7 +8,7 @@ namespace FallWeiss
     {
         public static readonly Color Text = FU.Hex(0xe6e2c8), Gold = FU.Hex(0xffd96a), Olive = FU.Hex(0x7d8c57), Dim = FU.Hex(0x9aa57a), Red = FU.Hex(0xe05a4a), Green = FU.Hex(0x6bd36b);
         public static Font body, head;
-        public static GUIStyle label, small, title, h1, h2, h3, button, bigButton, card, cardSel, panel, pill, center, ammo;
+        public static GUIStyle line, label, small, title, h1, h2, h3, button, bigButton, card, cardSel, panel, pill, center, ammo;
         public static Texture2D white, gradL, gradB, gradT, emblemG, emblemP;
         static bool ready;
 
@@ -43,7 +43,8 @@ namespace FallWeiss
                 int cx = Mathf.Abs(x - 32), cy = Mathf.Abs(y - 32); if (cx > 26 || cy > 26) return Color.clear; if (cx > 24 || cy > 24) return new Color(.9f, .88f, .82f);
                 bool w = ((x - 6) / 13 + (y - 6) / 13) % 2 == 0; return w ? new Color(.93f, .92f, .88f) : new Color(.78f, .12f, .14f);
             });
-            label = St(GUI.skin.label, body, 15, Text); small = St(GUI.skin.label, body, 14, Text); center = St(label, body, 15, Text, TextAnchor.MiddleCenter);
+            label = St(GUI.skin.label, body, 16, Text); small = St(GUI.skin.label, body, 15, Text); center = St(label, body, 15, Text, TextAnchor.MiddleCenter);
+            line = new GUIStyle(small) { wordWrap = false, clipping = TextClipping.Clip };
             title = St(GUI.skin.label, head, 64, Gold, TextAnchor.UpperLeft, FontStyle.Bold); title.wordWrap = false;
             h1 = St(GUI.skin.label, head, 40, Text, TextAnchor.MiddleCenter, FontStyle.Bold); h2 = St(GUI.skin.label, head, 24, Gold, TextAnchor.UpperLeft, FontStyle.Bold); h3 = St(GUI.skin.label, head, 17, Dim, TextAnchor.UpperLeft);
             ammo = St(GUI.skin.label, head, 34, Text, TextAnchor.LowerRight, FontStyle.Bold);
@@ -68,5 +69,15 @@ namespace FallWeiss
         }
         public static string Spaced(string s) { var sb = new System.Text.StringBuilder(); foreach (var ch in s) { sb.Append(ch); if (ch != ' ') sb.Append(' '); } return sb.ToString(); }
         public static string Hex(Color c) => "#" + ColorUtility.ToHtmlStringRGB(c);
+        static readonly GUIContent gc = new GUIContent();
+        /// Shortens `s` with an ellipsis until it fits `w` pixels in style `st` (so labels never spill or get cut mid-word).
+        public static string Fit(string s, GUIStyle st, float w)
+        {
+            if (string.IsNullOrEmpty(s)) return s; gc.text = s; if (st.CalcSize(gc).x <= w) return s;
+            for (int n = s.Length - 1; n > 1; n--) { gc.text = s.Substring(0, n).TrimEnd(' ', '·', '.') + "…"; if (st.CalcSize(gc).x <= w) return gc.text; }
+            return "…";
+        }
+        /// Height of word-wrapped text at width `w`.
+        public static float TextH(string s, GUIStyle st, float w) { gc.text = s; return st.CalcHeight(gc, w); }
     }
 }

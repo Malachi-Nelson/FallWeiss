@@ -17,7 +17,8 @@ namespace FallWeiss
     [Serializable] public class FSeg { public string k; public float x1, z1, x2, z2; }
     [Serializable] public class FProp { public string k; public float x, z, a, b; }
     [Serializable] public class FDecor { public string k; public float[] v; }
-    [Serializable] public class FPoint { public string n; public float x, z, r; public bool inside; }
+    [Serializable] public class FStream { public float[] pts; public float w, depth; }   // a brook / ditch, first point upstream
+    [Serializable] public class FPoint { public string n; public float x, z, r; public bool inside; public float w, d, rot; public string key; }   // w,d>0: rectangular zone (rot radians); key: hill / bridgehead / building / area
     [Serializable] public class FXZ { public float x, z; }
     [Serializable] public class FForce { public string type; public int n; public int loc; public float sp; }
     [Serializable] public class FComp { public string type; public int n; }
@@ -32,7 +33,7 @@ namespace FallWeiss
         public float time, half, vis, relief;
         public string ground;
         public bool city; public bool range;   // range = the weapons Test Range (no objectives / waves / AI director)
-        public int fortified;   // version of the RO2 objective fortification pass applied (Fall Weiss / Fortify Objectives)
+        public int fortified; public float north; public FStream[] streams; public int ponds;   // ponds: 0 = place natural ponds automatically, -1 = none   // north: real compass bearing of the map's +z axis, so the HUD compass matches the historical ground   // version of the RO2 objective fortification pass applied (Fall Weiss / Fortify Objectives)
         public FDecor[] decor;
         public bool hasSea; public float seaHx, seaHz;
         public bool hasRiver; public float rz0, ramp, rk, rw, rlevel; public float[] bridges;
@@ -116,17 +117,17 @@ namespace FallWeiss
 
         public static readonly Dictionary<string, WeaponDef> WEAPONS = new Dictionary<string, WeaponDef>
         {
-            ["kar98k"] = new WeaponDef { name = "Karabiner 98k", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.05f, dmg = 80, spread = .0011f, ads = 40, recoil = .7f, fallMul = 1 },
-            ["wz29"] = new WeaponDef { name = "Karabin wz.29 Mauser", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.05f, dmg = 80, spread = .0012f, ads = 40, recoil = .7f, fallMul = 1 },
-            ["mp38"] = new WeaponDef { name = "MP 38", vm = "smg", clip = 32, reserve = 128, reload = 2.2f, rof = .105f, dmg = 42, spread = .0065f, auto = true, ads = 52, snd = "mg", recoil = .2f, range = 90, fallNear = 18, fallFar = 75, fallMul = .45f },
-            ["bar28"] = new WeaponDef { name = "Rkm wz.28 (BAR)", vm = "bar", clip = 20, reserve = 100, reload = 2.7f, rof = .1f, dmg = 52, spread = .0045f, auto = true, ads = 46, snd = "mg", recoil = .3f, range = 140, fallNear = 55, fallFar = 150, fallMul = .7f },
-            ["mg34"] = new WeaponDef { name = "MG 34", vm = "mg", clip = 75, reserve = 225, reload = 4.6f, rof = .07f, dmg = 52, spread = .0055f, auto = true, ads = 48, snd = "mg", recoil = .17f, mg = true },
-            ["ckm30"] = new WeaponDef { name = "Ckm wz.30", vm = "mg", clip = 60, reserve = 240, reload = 4.2f, rof = .085f, dmg = 52, spread = .0055f, auto = true, ads = 48, snd = "mg", recoil = .17f, mg = true },
-            ["p38"] = new WeaponDef { name = "Walther P38", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 45, spread = .005f, ads = 58, recoil = .3f, range = 70, fallNear = 20, fallFar = 60, fallMul = .6f },
-            ["vis"] = new WeaponDef { name = "Vis wz.35", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 45, spread = .005f, ads = 58, recoil = .3f, range = 70, fallNear = 20, fallFar = 60, fallMul = .6f },
-            ["p08"] = new WeaponDef { name = "Luger P08", vm = "pistol", clip = 8, reserve = 24, reload = 2.1f, rof = .28f, dmg = 45, spread = .0048f, ads = 58, recoil = .32f, range = 70, fallNear = 20, fallFar = 60, fallMul = .6f },
-            ["kar98kz"] = new WeaponDef { name = "Kar98k ZF39 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 100, spread = .0004f, ads = 9, scope = true, recoil = .8f, range = 420, fallNear = 999, fallFar = 1000, fallMul = 1 },
-            ["wz29z"] = new WeaponDef { name = "Mauser wz.29 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 100, spread = .0004f, ads = 9, scope = true, recoil = .8f, range = 420, fallNear = 999, fallFar = 1000, fallMul = 1 },
+            ["kar98k"] = new WeaponDef { name = "Karabiner 98k", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.1f, dmg = 100, spread = .0005f, ads = 40, recoil = .7f, fallMul = 1, snd = "k98" },
+            ["wz29"] = new WeaponDef { name = "Karabin wz.29 Mauser", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.1f, dmg = 100, spread = .00055f, ads = 40, recoil = .7f, fallMul = 1, snd = "k98" },
+            ["mp38"] = new WeaponDef { name = "MP 38", vm = "smg", clip = 32, reserve = 128, reload = 2.2f, rof = .12f, dmg = 45, spread = .0065f, auto = true, ads = 46, recoil = .2f, range = 90, fallNear = 40, fallFar = 120, fallMul = .6f, snd = "mp40" },
+            ["bar28"] = new WeaponDef { name = "Rkm wz.28 (BAR)", vm = "bar", clip = 20, reserve = 100, reload = 2.7f, rof = .1f, dmg = 100, spread = .0022f, auto = true, ads = 45, recoil = .3f, range = 140, fallNear = 55, fallFar = 150, fallMul = .7f, snd = "bar" },
+            ["mg34"] = new WeaponDef { name = "MG 34", vm = "mg", clip = 75, reserve = 225, reload = 4.6f, rof = .075f, dmg = 100, spread = .0026f, auto = true, ads = 46, recoil = .17f, mg = true, snd = "mg42" },
+            ["ckm30"] = new WeaponDef { name = "Ckm wz.30", vm = "ckm", clip = 100, reserve = 300, reload = 4.2f, rof = .1f, dmg = 100, spread = .0026f, auto = true, ads = 46, recoil = .17f, mg = true, snd = "browning" },
+            ["p38"] = new WeaponDef { name = "Walther P38", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 42, spread = .005f, ads = 60, recoil = .3f, range = 70, fallNear = 25, fallFar = 80, fallMul = .65f, snd = "p38" },
+            ["vis"] = new WeaponDef { name = "Vis wz.35", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 42, spread = .005f, ads = 60, recoil = .3f, range = 70, fallNear = 25, fallFar = 80, fallMul = .65f, snd = "pistol" },
+            ["p08"] = new WeaponDef { name = "Luger P08", vm = "pistol", clip = 8, reserve = 24, reload = 2.1f, rof = .28f, dmg = 42, spread = .0048f, ads = 60, recoil = .32f, range = 70, fallNear = 25, fallFar = 80, fallMul = .65f, snd = "pistol" },
+            ["kar98kz"] = new WeaponDef { name = "Kar98k ZF39 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 110, spread = .00025f, ads = 9, scope = true, recoil = .8f, range = 420, fallNear = 999, fallFar = 1000, fallMul = 1, snd = "k98" },
+            ["wz29z"] = new WeaponDef { name = "Mauser wz.29 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 110, spread = .00025f, ads = 9, scope = true, recoil = .8f, range = 420, fallNear = 999, fallFar = 1000, fallMul = 1, snd = "k98" },
             ["bayonet"] = new WeaponDef { name = "Bayonet", vm = "knife", melee = true, rof = .75f, dmg = 90, reach = 2.8f },
             ["sabre"] = new WeaponDef { name = "Szabla wz.34", vm = "sabre", melee = true, rof = .85f, dmg = 100, reach = 3.5f },
             // crew weapons (player driving a gun / tank)
@@ -142,10 +143,10 @@ namespace FallWeiss
         {
             switch (type)
             {
-                case "rifle": return team == 0 ? new[] { "kar98k", "p38", "bayonet" } : new[] { "wz29", "vis", "bayonet" };
-                case "mg": return team == 0 ? new[] { "mg34", "p38" } : new[] { "ckm30", "vis" };
-                case "sniper": return team == 0 ? new[] { "kar98kz", "p38", "bayonet" } : new[] { "wz29z", "vis", "bayonet" };
-                case "cav": return new[] { "wz29", "sabre", "vis" };
+                case "rifle": return team == 0 ? new[] { "kar98k", "p08", "bayonet" } : new[] { "wz29", "vis", "bayonet" };
+                case "mg": return team == 0 ? new[] { "mg34", "p08" } : new[] { "ckm30", "vis" };
+                case "sniper": return team == 0 ? new[] { "kar98kz", "p08", "bayonet" } : new[] { "wz29z", "vis", "bayonet" };
+                case "cav": return team == 0 ? new[] { "kar98k", "sabre", "p08" } : new[] { "wz29", "sabre", "vis" };   // 1939: each side its own carbine and pistol
                 case "at": return new[] { "at_gun" };
                 case "tank": return new[] { "tank_gun" };
             }
@@ -154,11 +155,11 @@ namespace FallWeiss
 
         public static readonly ClassDef[] CLASSES =
         {
-            new ClassDef { key = "rifleman", label = "Rifleman", type = "rifle", gren = 2, weps = new[] { new[] { "kar98k", "p38", "bayonet" }, new[] { "wz29", "vis", "bayonet" } } },
-            new ClassDef { key = "assault", label = "Assault", type = "rifle", gren = 3, smoke = 1, weps = new[] { new[] { "mp38", "p38", "bayonet" }, new[] { "bar28", "vis", "bayonet" } } },
-            new ClassDef { key = "gunner", label = "Machine Gunner", type = "mg", gren = 1, weps = new[] { new[] { "mg34", "p38" }, new[] { "ckm30", "vis" } } },
+            new ClassDef { key = "rifleman", label = "Rifleman", type = "rifle", gren = 2, weps = new[] { new[] { "kar98k", "p08", "bayonet" }, new[] { "wz29", "vis", "bayonet" } } },
+            new ClassDef { key = "assault", label = "Assault", type = "rifle", gren = 3, smoke = 1, weps = new[] { new[] { "mp38", "p08", "bayonet" }, new[] { "bar28", "vis", "bayonet" } } },
+            new ClassDef { key = "gunner", label = "Machine Gunner", type = "mg", gren = 1, weps = new[] { new[] { "mg34", "p08" }, new[] { "ckm30", "vis" } } },
             new ClassDef { key = "officer", label = "Officer", type = "rifle", gren = 1, smoke = 2, weps = new[] { new[] { "mp38", "p08" }, new[] { "wz29", "vis" } } },
-            new ClassDef { key = "sniper", label = "Sniper", type = "sniper", gren = 1, weps = new[] { new[] { "kar98kz", "p38" }, new[] { "wz29z", "vis" } } },
+            new ClassDef { key = "sniper", label = "Sniper", type = "sniper", gren = 1, weps = new[] { new[] { "kar98kz", "p08" }, new[] { "wz29z", "vis" } } },
         };
 
         public static readonly BuyDef[] BUY =

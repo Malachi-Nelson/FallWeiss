@@ -7,6 +7,7 @@
 //    magazine changes (MP40 / StG 44 / Luger), MG 42 feed-cover belt change, Panzerschreck rocket loading
 //  * first person: the same body and gun, positioned on the camera (head collapsed), replacing the old viewmodel
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering.Universal;
 
@@ -63,6 +64,7 @@ namespace FallWeiss
                 if (t.name.StartsWith("Weapon_handle") && !t.name.EndsWith("_end")) { handleScale[t.name] = t.lossyScale; handles[t.name] = t; }
             foreach (var kv in handles) { kv.Value.SetParent(gun, false); kv.Value.localScale = handleScale[kv.Key]; }
             anim.Rebind();
+            if (armL[2]) lHandRest = armL[2].localRotation;   // bind pose of the off hand (relaxed, in line with the forearm)
             rends = GetComponentsInChildren<Renderer>(true);
             foreach (var r in rends) if (r.name == "Jacket") body = r;
             if (model != null && model.bareSkin) foreach (var r in rends) if (r is SkinnedMeshRenderer && r.sharedMaterial && r.sharedMaterial.name.ToLower().Contains("skin")) r.sharedMaterial = model.bareSkin;
@@ -79,23 +81,66 @@ namespace FallWeiss
 
         /// RO2-style hit zones on the visible skeleton (bone +Y runs along each bone; the rig is scaled x29, so each
         /// collider sits on an unscaled child and is sized in metres).
+        /// Hit zones on the visible skeleton, sized from the model's own mesh: every skinned vertex is credited to the
+        /// nearest zone bone up its skin hierarchy (hands to the forearm, feet to the shin, neck to the chest), and each
+        /// zone box spans the 4th-96th percentile of its vertices plus 1.5 cm. Any soldier model gets hitboxes that match
+        /// its silhouette; a bone with too little geometry (or an unreadable mesh) keeps the default size from the table.
         public void AddHitZones(Unit u)
         {
-            Zone(u, head, HitZone.Head, new Vector3(0, .11f, .02f), Vector3.zero, .13f);
-            Zone(u, chest, HitZone.Chest, new Vector3(0, .22f, .01f), new Vector3(.40f, .30f, .26f));
-            Zone(u, pelvis, HitZone.Stomach, new Vector3(0, .15f, 0), new Vector3(.36f, .30f, .24f));
-            Zone(u, armL[0], HitZone.Arm, new Vector3(0, .15f, 0), new Vector3(.11f, .30f, .11f)); Zone(u, armR[0], HitZone.Arm, new Vector3(0, .15f, 0), new Vector3(.11f, .30f, .11f));
-            Zone(u, armL[1], HitZone.Arm, new Vector3(0, .2f, 0), new Vector3(.09f, .40f, .09f)); Zone(u, armR[1], HitZone.Arm, new Vector3(0, .2f, 0), new Vector3(.09f, .40f, .09f));
-            Zone(u, legL[0], HitZone.Leg, new Vector3(0, .16f, 0), new Vector3(.15f, .34f, .15f)); Zone(u, legR[0], HitZone.Leg, new Vector3(0, .16f, 0), new Vector3(.15f, .34f, .15f));
-            Zone(u, legL[1], HitZone.Leg, new Vector3(0, .21f, 0), new Vector3(.12f, .42f, .12f)); Zone(u, legR[1], HitZone.Leg, new Vector3(0, .21f, 0), new Vector3(.12f, .42f, .12f));
+            var fit = FitZones();
+            Zone(u, head, HitZone.Head, new Vector3(0, .11f, .02f), Vector3.zero, .13f, fit);
+            Zone(u, chest, HitZone.Chest, new Vector3(0, .22f, .01f), new Vector3(.40f, .30f, .26f), 0, fit);
+            Zone(u, pelvis, HitZone.Stomach, new Vector3(0, .15f, 0), new Vector3(.36f, .30f, .24f), 0, fit);
+            Zone(u, armL[0], HitZone.Arm, new Vector3(0, .15f, 0), new Vector3(.11f, .30f, .11f), 0, fit); Zone(u, armR[0], HitZone.Arm, new Vector3(0, .15f, 0), new Vector3(.11f, .30f, .11f), 0, fit);
+            Zone(u, armL[1], HitZone.Arm, new Vector3(0, .2f, 0), new Vector3(.09f, .40f, .09f), 0, fit); Zone(u, armR[1], HitZone.Arm, new Vector3(0, .2f, 0), new Vector3(.09f, .40f, .09f), 0, fit);
+            Zone(u, legL[0], HitZone.Leg, new Vector3(0, .16f, 0), new Vector3(.15f, .34f, .15f), 0, fit); Zone(u, legR[0], HitZone.Leg, new Vector3(0, .16f, 0), new Vector3(.15f, .34f, .15f), 0, fit);
+            Zone(u, legL[1], HitZone.Leg, new Vector3(0, .21f, 0), new Vector3(.12f, .42f, .12f), 0, fit); Zone(u, legR[1], HitZone.Leg, new Vector3(0, .21f, 0), new Vector3(.12f, .42f, .12f), 0, fit);
         }
-        static void Zone(Unit u, Transform bone, HitZone z, Vector3 c, Vector3 size, float r = 0)
+        static void Zone(Unit u, Transform bone, HitZone z, Vector3 c, Vector3 size, float r, Dictionary<Transform, Bounds> fit)
         {
-            if (!bone) return; var ls = bone.lossyScale.x; if (ls < 1e-5f) ls = 1;
+            if (!bone) return; var ls = bone.lossyScale.x; if (ls < 1e-5f) ls = 1; bool fitted = false;
+            if (fit != null && fit.TryGetValue(bone, out var b))
+            {   // metres in the bone's frame; a head becomes the sphere around its box, limbs keep a sane minimum thickness
+                c = b.center; fitted = true;
+                if (r > 0) r = Mathf.Clamp(Mathf.Max(b.extents.x, Mathf.Max(b.extents.y, b.extents.z)) * .92f, .09f, .16f);
+                else size = new Vector3(Mathf.Max(.07f, b.size.x), Mathf.Max(.07f, b.size.y), Mathf.Max(.07f, b.size.z));
+            }
             var g = new GameObject("Hit_" + z); g.transform.SetParent(bone, false); g.transform.localPosition = c / ls; g.transform.localScale = Vector3.one / ls;
             if (r > 0) { var sc = g.AddComponent<SphereCollider>(); sc.radius = r; sc.isTrigger = true; }
             else { var bc = g.AddComponent<BoxCollider>(); bc.size = size; bc.isTrigger = true; }
-            var h = g.AddComponent<UnitHit>(); h.u = u; h.zone = z; h.head = z == HitZone.Head;
+            var h = g.AddComponent<UnitHit>(); h.u = u; h.zone = z; h.head = z == HitZone.Head; h.fitted = fitted;
+        }
+        static readonly Dictionary<string, Dictionary<string, Bounds>> fitCache = new Dictionary<string, Dictionary<string, Bounds>>();
+        Dictionary<Transform, Bounds> FitZones()
+        {
+            var zb = new List<Transform> { head, chest, pelvis, armL[0], armL[1], armR[0], armR[1], legL[0], legL[1], legR[0], legR[1] }; zb.RemoveAll(t => !t);
+            string key = (model != null ? model.name : name) + "|" + zb.Count; var res = new Dictionary<Transform, Bounds>();
+            if (!fitCache.TryGetValue(key, out var byName))
+            {
+                byName = new Dictionary<string, Bounds>(); var pts = new Dictionary<string, List<Vector3>>(); var set = new HashSet<Transform>(zb);
+                foreach (var smr in GetComponentsInChildren<SkinnedMeshRenderer>(true))
+                {
+                    var mesh = smr.sharedMesh; if (!mesh || smr == gunMesh || !mesh.isReadable) continue; var bones = smr.bones; if (bones == null || bones.Length == 0) continue;
+                    var bp = mesh.bindposes; var bw = mesh.boneWeights; var vs = mesh.vertices; if (bw.Length != vs.Length) continue;
+                    var map = new int[bones.Length];
+                    for (int i = 0; i < bones.Length; i++) { var t = bones[i]; while (t && !set.Contains(t)) t = t.parent; map[i] = t ? System.Array.IndexOf(bones, t) : -1; }
+                    for (int v = 0; v < vs.Length; v++)
+                    {
+                        int bi = bw[v].boneIndex0; if (bi < 0 || bi >= map.Length) continue; int zi = map[bi]; if (zi < 0 || zi >= bp.Length) continue;
+                        var zt = bones[zi]; float ls = zt.lossyScale.x; if (ls < 1e-5f) ls = 1;
+                        if (!pts.TryGetValue(zt.name, out var l)) pts[zt.name] = l = new List<Vector3>(); l.Add(bp[zi].MultiplyPoint3x4(vs[v]) * ls);
+                    }
+                }
+                foreach (var kv in pts)
+                {
+                    if (kv.Value.Count < 24) continue; var l = kv.Value; float Pc(System.Func<Vector3, float> f, float q) { var a = l.Select(f).OrderBy(x => x).ToList(); return a[Mathf.Clamp((int)(q * (a.Count - 1)), 0, a.Count - 1)]; }
+                    var mn = new Vector3(Pc(p => p.x, .04f), Pc(p => p.y, .04f), Pc(p => p.z, .04f)); var mx = new Vector3(Pc(p => p.x, .96f), Pc(p => p.y, .96f), Pc(p => p.z, .96f));
+                    var bb = new Bounds(); bb.SetMinMax(mn - Vector3.one * .015f, mx + Vector3.one * .015f); byName[kv.Key] = bb;
+                }
+                fitCache[key] = byName;
+            }
+            foreach (var t in zb) if (byName.TryGetValue(t.name, out var b)) res[t] = b;
+            return res;
         }
 
         void Update()
@@ -134,6 +179,18 @@ namespace FallWeiss
         // ---- first person: arms + gun go to their own overlay camera (fixed viewmodel FOV, never clip into walls) ----
         public const int FPLayer = 31;
         static Camera fpCam; static int fpUsers;
+        /// The end of the barrel of the gun this soldier is holding, in world space.
+        public Vector3? MuzzleWorld => rig != null && gun ? gun.TransformPoint(rig.muzzle) : (Vector3?)null;
+        /// Bore direction (butt to muzzle) of the held gun.
+        public Vector3? BoreDir => rig != null && gun ? (gun.TransformPoint(rig.muzzle) - gun.TransformPoint(rig.stock)).normalized : (Vector3?)null;
+        /// The muzzle as the player sees it: first-person arms and gun are drawn by their own camera with its own field of
+        /// view, so the barrel end is carried over through the screen into the world camera's view at the same depth.
+        public Vector3? MuzzleOnScreen(Camera world)
+        {
+            var m = MuzzleWorld; if (m == null) return null;
+            if (firstPerson && fpCam && world) { var sp = fpCam.WorldToScreenPoint(m.Value); if (sp.z > .05f) return world.ScreenToWorldPoint(new Vector3(sp.x, sp.y, Mathf.Clamp(sp.z, .25f, 3f))); }
+            return m;
+        }
         static void FpCamera(Camera main, bool on)
         {
             if (!main) return;
@@ -187,6 +244,9 @@ namespace FallWeiss
 
         // ================= frame =================
         bool Visible() => firstPerson || (body && body.enabled);   // fog-of-war hidden units skip the rig
+        static bool animWarned; Quaternion lHandRest = Quaternion.identity;
+        /// First-person viewmodel tuning (FOV of the viewmodel camera, hand scale, how far the body sits behind the eye when aiming).
+        public static float vmFovHip = 58, vmFovAds = 66, vmHandHip = .8f, vmHandAds = .64f, vmBackAds = .22f;
         static float S(float t, float a, float b) { float x = Mathf.Clamp01((t - a) / (b - a)); return x * x * (3 - 2 * x); }
         static float Damp(float cur, float target, float rate, float dt) => Mathf.Lerp(cur, target, 1 - Mathf.Exp(-rate * dt));
 
@@ -194,15 +254,22 @@ namespace FallWeiss
         {
             if (rig == null || !armR[0] || !chest) return;   // (state is lost if scripts reload mid-play)
             float dt = Mathf.Min(Time.deltaTime, .05f);
-            anim.SetFloat(pSpeed, dead ? 0 : speed, .1f, dt);
+            if (anim.isActiveAndEnabled && anim.runtimeAnimatorController) anim.SetFloat(pSpeed, dead ? 0 : speed, .1f, dt);
+            else if (!animWarned)
+            {   // report the first idle Animator once instead of a warning every frame for every soldier
+                animWarned = true;
+                Debug.LogWarning($"[FallWeiss] Soldier Animator not running on {name}: controller={(anim.runtimeAnimatorController ? anim.runtimeAnimatorController.name : "null")} enabled={anim.enabled} activeInHierarchy={anim.gameObject.activeInHierarchy} weapon={weapon}");
+            }
             bool reloading = reload != ReloadKind.None && !dead;
-            wAds = firstPerson ? ads : Damp(wAds, raise && hasAim && !sprint && !reloading && !dead ? 1 : 0, 9, dt);
+            float boltDip = cls == "bolt" && cycleT > 0 ? Mathf.Sin(Mathf.Clamp01(cycleT) * Mathf.PI) : 0;   // RO2: the rifle comes off the cheek while the bolt is worked, so the hand stays below the eye
+            wAds = firstPerson ? ads * (1 - .6f * boltDip) : Damp(wAds, raise && hasAim && !sprint && !reloading && !dead ? 1 : 0, 9, dt);
             wSprint = Damp(wSprint, sprint && !reloading && !dead && wAds < .5f ? 1 : 0, 7, dt);
             wReload = Damp(wReload, reloading ? 1 : 0, 9, dt);
             wCrouch = Damp(wCrouch, crouch, 8, dt);
             Springs(dt);
             if (firstPerson && neck) neck.localScale = Vector3.one * .001f;
-            if (firstPerson && fpCam) fpCam.fieldOfView = Mathf.Lerp(58, 48, ads);
+            if (firstPerson && fpCam) fpCam.fieldOfView = Mathf.Lerp(vmFovHip, vmFovAds, ads);   // viewmodel FOV stays put while the world zooms (RO2: separate first-person mesh FOV)
+            if (firstPerson && armL[2] && armR[2]) { float hs = Mathf.Lerp(vmHandHip, vmHandAds, wAds); armL[2].localScale = armR[2].localScale = Vector3.one * hs; }   // the pack's hands are oversized at sight distance
             if (firstPerson && hideFP) { SetRends(false); return; } else if (firstPerson) SetRends(true);
             if (!Visible() && !firstPerson) { Actions(dt, false); return; }   // keep timers running, skip the IK
 
@@ -210,7 +277,7 @@ namespace FallWeiss
             if (firstPerson && cam)
             {   // body hangs off the camera: eye ~ head bone + (0, .1, .1)
                 var yaw = Quaternion.Euler(0, cam.eulerAngles.y, 0);
-                transform.SetPositionAndRotation(cam.position - yaw * new Vector3(0, Mathf.Lerp(Mathf.Lerp(1.56f, cls == "pistol" ? 1.53f : 1.43f, wAds), 1.66f, wReload), Mathf.Lerp(.1f, .16f, wAds)), yaw);   // cheek weld: the shoulders rise to the stock as you aim
+                transform.SetPositionAndRotation(cam.position - yaw * new Vector3(0, Mathf.Lerp(Mathf.Lerp(1.56f, cls == "pistol" ? 1.53f : 1.43f, wAds), 1.66f, wReload), Mathf.Lerp(.1f, vmBackAds, wAds)), yaw);   // cheek weld: the shoulders rise to the stock as you aim
             }
             var bodyRot = transform.rotation; var fwd = bodyRot * Vector3.forward; var right = bodyRot * Vector3.right;
             if (!firstPerson) CrouchLegs(fwd, up);
@@ -247,7 +314,10 @@ namespace FallWeiss
             var poleL = sL + aimYaw * new Vector3(-.12f, -.6f, .3f);
             if (cls == "launcher") { poleR = sR + aimYaw * new Vector3(.3f, -.6f, 0); poleL = sL + aimYaw * new Vector3(-.2f, -.6f, .2f); }
             TwoBone(armR[0], armR[1], armR[2], rT, poleR, rR);
+            float oneHand = cls == "pistol" && !dead ? 1 - wReload : 0;   // pistols are fired one-handed; the off hand only comes up to change the magazine
+            if (oneHand > 0) { var restL = sL + bodyRot * new Vector3(-.07f, -.5f, .07f); lT = Vector3.Lerp(lT, restL, oneHand); poleL = Vector3.Lerp(poleL, sL + bodyRot * new Vector3(-.1f, -.3f, -.4f), oneHand); }
             TwoBone(armL[0], armL[1], armL[2], lT, poleL, lR);
+            if (oneHand > 0) armL[2].localRotation = Quaternion.Slerp(armL[2].localRotation, lHandRest, oneHand);
             Grip();
             if (clipProp && clipProp.activeSelf) PlaceClip(); if (roundProp && roundProp.activeSelf) PlaceRound();
         }

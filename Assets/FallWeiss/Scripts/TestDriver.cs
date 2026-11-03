@@ -2,7 +2,7 @@
 // Drop a text file at Logs/fallweiss_input.txt (next to Assets/ in the editor, next to the .exe in a build) and it is
 // executed line by line, injecting real Input System events, so every key binding is exercised exactly as a player would.
 // Commands:  wait s | tap KEY | hold KEY s | down KEY | up KEY | look dx dy s | lmb s | rmb s | click x y [right]
-//            mission idx side | range | shot name | log text | timescale v
+//            mission idx side | range | shot name | log text | timescale v | lmbdown | lmbup | rmbdown | rmbup
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -86,6 +86,10 @@ namespace FallWeiss
                             float e = Time.realtimeSinceStartup + F(1, .1f); while (Time.realtimeSinceStartup < e) yield return null;
                             lmb = rmb = false; SendMouse(Vector2.zero); yield return null; break;
                         }
+                    case "lmbdown": lmb = true; SendMouse(Vector2.zero); yield return null; break;   // hold a button across other commands (ADS + shot)
+                    case "lmbup": lmb = false; SendMouse(Vector2.zero); yield return null; break;
+                    case "rmbdown": rmb = true; SendMouse(Vector2.zero); yield return null; break;
+                    case "rmbup": rmb = false; SendMouse(Vector2.zero); yield return null; break;
                     case "click":
                         {   // x/y in 1920x1080 HUD space, origin top-left
                             float sx = Screen.width / 1920f, sy = Screen.height / 1080f; pos = new Vector2(F(1) * sx, Screen.height - F(2) * sy);

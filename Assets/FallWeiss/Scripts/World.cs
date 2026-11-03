@@ -1,6 +1,7 @@
 // Fall Weiss — world generation: heightmap (port of baseHeight/fullHeight), terrain mesh, buildings,
 // villages/city blocks, forests, water, bridges, fences, props and capture-point flags.
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -11,14 +12,27 @@ namespace FallWeiss
     {
         public float x0, x1, z0, z1, y0, y1, h, hp, maxhp, ry0, ry1;
         public bool low, dead, rel, floor, ceil, nocover, soft, wire, smoking;
-        public GameObject col, vis; public Bd bd; public string pk, kind; public int hex;
+        public GameObject col, vis; public Bd bd; public string pk, kind; public int hex; public List<Obst> link;
     }
 
     public class Tree { public float x, z, s; public int k; public bool alive = true; public long chunk; public Color c; }
     public class CapPoint
     {
         public string n; public float x, z, r, ap, pushT, best, stallT; public int owner, g, e; public bool locked, inside;
+        public float hw, hd, rot; public bool rect; public string key;   // rect: the zone is a rotated rectangle (a whole building interior, a bridgehead, an embankment); r is then its outer radius
         public Renderer cloth, ring;
+        public bool Contains(float px, float pz)
+        {
+            float dx = px - x, dz = pz - z; if (!rect) return dx * dx + dz * dz < r * r;
+            float c = Mathf.Cos(rot), s = Mathf.Sin(rot); return Mathf.Abs(dx * c - dz * s) < hw && Mathf.Abs(dx * s + dz * c) < hd;
+        }
+        /// A random spot inside the zone, k = fraction of its size (0..1).
+        public Vector2 RandIn(float k)
+        {
+            if (!rect) { float a = FU.Rand(0, 6.283f), d = Mathf.Sqrt(FU.Rand(0, 1)) * r * k; return new Vector2(x + Mathf.Cos(a) * d, z + Mathf.Sin(a) * d); }
+            float lx = FU.Rand(-1, 1) * hw * k, lz = FU.Rand(-1, 1) * hd * k, c = Mathf.Cos(rot), s = Mathf.Sin(rot); return new Vector2(x + lx * c + lz * s, z - lx * s + lz * c);
+        }
+        public Vector2 Local2World(float lx, float lz) { float c = Mathf.Cos(rot), s = Mathf.Sin(rot); return new Vector2(x + lx * c + lz * s, z - lx * s + lz * c); }
     }
 
     /// Batches boxes/cones/prisms into vertex-coloured meshes (one draw call per ~60k verts).
@@ -26,6 +40,7 @@ namespace FallWeiss
     {
         readonly List<Vector3> v = new List<Vector3>(); readonly List<Vector3> n = new List<Vector3>();
         readonly List<Color> c = new List<Color>(); readonly List<int> t = new List<int>();
+        public bool Empty => v.Count == 0;
 
         void Quad(Vector3 a, Vector3 b, Vector3 cc, Vector3 d, Color col)
         {
@@ -129,6 +144,18 @@ namespace FallWeiss
             if (alongX) { Quad(a, r0, r1, b, col); Quad(c1, r1, r0, c0, col); Tri(a, c0, r0, col); Tri(b, r1, c1, col); }
             else { Quad(b, r1, r0, a, col); Quad(c0, r0, r1, c1, col); Tri(c0, a, r0, col); Tri(r1, b, c1, col); }
         }
+        /// The triangular end walls under a gable roof, in the wall colour, flush with the wall faces.
+        public void GableEnds(Vector3 bc, float w, float d, float rh, float rotY, Color col)
+        {
+            col = col.linear; float cs = Mathf.Cos(rotY), sn = Mathf.Sin(rotY); bool alongX = w >= d;
+            float L = (alongX ? w : d) / 2 - .02f, Sw = (alongX ? d : w) / 2, S = Sw + .45f, yw = rh * (1 - Sw / S);
+            Vector3 P(float l, float y, float s) => bc + R(alongX ? new Vector3(l, y, s) : new Vector3(s, y, l), cs, sn);
+            foreach (var e in new[] { -L, L })
+            {
+                Vector3 a = P(e, -.05f, -Sw), b = P(e, -.05f, Sw), c = P(e, yw, Sw), dd = P(e, yw, -Sw), top = P(e, rh - .05f, 0);
+                Quad(a, b, c, dd, col); Quad(dd, c, b, a, col); Tri(dd, c, top, col); Tri(top, c, dd, col);
+            }
+        }
         public int Verts => v.Count;
         public GameObject Build(string name, Transform parent, Material mat, bool shadows = true)
         {
@@ -146,6 +173,11 @@ namespace FallWeiss
         public static Mission M;
         public static Transform root;
         public static float? WL;
+        /// Inland water: ponds sit in natural hollows, brooks run downhill along authored lines; both are wadeable.
+        public class Pond { public float x, z, r, level, depth; }
+        public class Brook { public Vector2[] p; public float[] lv; public float w, depth; }
+        public static readonly List<Pond> ponds = new List<Pond>(); public static readonly List<Brook> brooks = new List<Brook>();
+        static bool carving;
         public static readonly List<Obst> obst = new List<Obst>();
         public static readonly List<Tree> trees = new List<Tree>();
         public static readonly Dictionary<long, List<Tree>> treeGrid = new Dictionary<long, List<Tree>>();
@@ -156,8 +188,11 @@ namespace FallWeiss
         public static readonly List<Transform> blades = new List<Transform>();
         public static readonly List<Vector3> fires = new List<Vector3>(); public static readonly List<bool> bigFire = new List<bool>(); public static readonly List<Obst> fireObst = new List<Obst>();
         public static Transform ship; public static readonly List<Transform> shipGuns = new List<Transform>();
+        public static readonly List<Vector3> farSmoke = new List<Vector3>();   // burning towns beyond the map edge
 
-        const float GS = 2; static float[] HG; static int HN; static float HO; static int NSEED;
+        static float GS = 2; static float[] HG; static int HN; static float HO; static int NSEED;
+        /// Map area relative to the original ~400 m maps: scatter counts (lone trees, haystacks, bushes, ground patches) scale with it.
+        public static float AreaK => Mathf.Max(1, M.half * M.half / 40000f);
 
         // ---------------- noise (port of hash2 / vnoise / fbm) ----------------
         static float Hash2(float x, float z) { double nn = System.Math.Sin(x * 127.1 + z * 311.7 + NSEED * 74.7) * 43758.5453; return (float)(nn - System.Math.Floor(nn)); }
@@ -193,7 +228,27 @@ namespace FallWeiss
                 h += M.rlevel + 4.5f; float d = Mathf.Abs(z - M.RiverC(x));
                 h = Mathf.Lerp(h, M.rlevel + 1, 1 - FU.Sm(M.rw, M.rw * 3.4f, d)); h = Mathf.Lerp(h, M.rlevel - 1.8f, 1 - FU.Sm(M.rw * .45f, M.rw, d));
             }
-            foreach (var r in M.rails) { float d = FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2); h += 1.3f * (1 - FU.Sm(2.5f, 6.5f, d)) * (M.rails.Length > 1 ? .4f : 1); }
+            if (M.hasRiver) { float d = Mathf.Abs(z - M.RiverC(x)); if (d > M.rw * 3.6f) h = Mathf.Max(h, M.rlevel + .8f + (h - M.rlevel - .8f) * .25f * FU.Sm(0, 1, h - M.rlevel)); }   // fields stay above the river: no stray lakes
+            if (M.hasSea && SeaEdge(x, z) > 12) h = Mathf.Max(h, .9f + Mathf.Max(0, h - .9f));
+            foreach (var r in M.rails)
+            {   // embankment, ramped down to a level crossing wherever a road crosses it
+                float d = FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2); if (d > 6.5f) continue; float cross = 1;
+                foreach (var rd in M.roads) cross = Mathf.Min(cross, FU.Sm(5, 16, FU.SegD(x, z, rd.x1, rd.z1, rd.x2, rd.z2)));
+                h += 1.3f * (1 - FU.Sm(2.5f, 6.5f, d)) * (M.rails.Length > 1 ? .4f : 1) * cross;
+            }
+            if (carving)
+            {
+                foreach (var p in ponds) { float d = FU.Hyp(x - p.x, z - p.z); if (d < p.r + 5) { float bed = p.level - p.depth * (1 - (d / p.r) * (d / p.r)); h = d < p.r ? Mathf.Min(h, bed) : Mathf.Min(h, Mathf.Lerp(p.level + .05f, h, (d - p.r) / 5)); } }
+                foreach (var b in brooks)
+                {
+                    float best = 1e9f; int bi = 0; float bt = 0;
+                    for (int i = 0; i < b.p.Length - 1; i++) { var a = b.p[i]; var c = b.p[i + 1]; var ab = c - a; float L2 = Mathf.Max(1e-4f, ab.sqrMagnitude), t = Mathf.Clamp01(((x - a.x) * ab.x + (z - a.y) * ab.y) / L2); float d = FU.Hyp(x - a.x - ab.x * t, z - a.y - ab.y * t); if (d < best) { best = d; bi = i; bt = t; } }
+                    float lv = Mathf.Lerp(b.lv[bi], b.lv[bi + 1], bt), hw = b.w / 2, ford = 1; foreach (var rd in M.roads) ford = Mathf.Min(ford, FU.Sm(4, 14, FU.SegD(x, z, rd.x1, rd.z1, rd.x2, rd.z2)));
+                    float bank = (3 + Mathf.Max(0, h - lv) * 1.2f) * Mathf.Lerp(4, 1, ford);   // where a road fords the brook the banks run out long and gentle
+                    if (best < hw) h = Mathf.Min(h, lv - b.depth * (1 - (best / hw) * (best / hw) * .6f));
+                    else if (best < hw + bank) h = Mathf.Min(h, Mathf.Lerp(lv + .05f, h, (best - hw) / bank));
+                }
+            }
             if (M.trenches != null && M.trenches.Length > 0) { float dm = TrenchD(x, z); if (dm < 4) h += -1.8f * (1 - FU.Sm(.9f, 1.9f, dm)) + .5f * FU.Sm(1.9f, 2.6f, dm) * (1 - FU.Sm(2.6f, 3.8f, dm)); }
             return h;
         }
@@ -213,6 +268,77 @@ namespace FallWeiss
             return h;
         }
         static void AddZone(float x, float z, float r, float b) { zones.Add(new Vector4(x, z, r, b)); zoneH.Add(BaseHeight(x, z)); }
+        /// Water surface height at (x, z), or -999 where there is no water.
+        public static float WaterY(float x, float z)
+        {
+            float y = -999; if (WL.HasValue) y = WL.Value;
+            foreach (var p in ponds) if (FU.Hyp(x - p.x, z - p.z) < p.r + 3) y = Mathf.Max(y, p.level);
+            foreach (var b in brooks)
+                for (int i = 0; i < b.p.Length - 1; i++)
+                {
+                    var a = b.p[i]; var c = b.p[i + 1]; var ab = c - a; float L2 = Mathf.Max(1e-4f, ab.sqrMagnitude), t = Mathf.Clamp01(((x - a.x) * ab.x + (z - a.y) * ab.y) / L2);
+                    if (FU.Hyp(x - a.x - ab.x * t, z - a.y - ab.y * t) < b.w / 2 + 2) y = Mathf.Max(y, Mathf.Lerp(b.lv[i], b.lv[i + 1], t));
+                }
+            return y;
+        }
+        /// How deep the water is over the ground here (0 on dry land or on a bridge deck).
+        public static float Depth(float x, float z) { float wy = WaterY(x, z); if (wy < -900) return 0; if (M.hasRiver && BridgeAt(x, z) > 0) return 0; return Mathf.Max(0, wy - H(x, z)); }
+        /// Vehicles ford up to ~0.9 m; men wade and swim anywhere short of open sea.
+        public static bool BlockedFor(Unit u, float x, float z)
+        {
+            float d = Depth(x, z); if (d <= 0) return false;
+            return u.def.kind == "tank" || u.def.kind == "gun" ? d > .9f : d > 3f;
+        }
+        /// RO2-style wading: ankle / knee / waist / chest bands slow a man down, deeper than that he swims.
+        public static float WadeMul(Unit u, float d)
+        {
+            if (d < .05f) return 1;
+            if (u.def.kind == "tank" || u.def.kind == "gun") return 1 - Mathf.Min(.5f, d * .45f);
+            if (u.def.kind == "cav") return d < 1.2f ? 1 - d * .35f : .4f;
+            return d < .24f ? .9f : d < .5f ? .75f : d < .86f ? .65f : d < 1.35f ? .6f : .35f;
+        }
+        public const float SWIM = 1.35f;
+        /// Natural water for the map: brooks from the mission data, ponds in the deepest hollows of open country.
+        static void PlaceWater(Mission m, Rng R)
+        {
+            ponds.Clear(); brooks.Clear(); carving = false;
+            if (m.streams != null)
+                foreach (var s in m.streams)
+                {
+                    if (s.pts == null || s.pts.Length < 4) continue; var raw = new List<Vector2>(); for (int i = 0; i + 1 < s.pts.Length; i += 2) raw.Add(new Vector2(s.pts[i], s.pts[i + 1]));
+                    var P = new List<Vector2>(); for (int i = 0; i < raw.Count - 1; i++) { int n = Mathf.Max(1, Mathf.CeilToInt((raw[i + 1] - raw[i]).magnitude / 6)); for (int k = 0; k < n; k++) P.Add(Vector2.Lerp(raw[i], raw[i + 1], k / (float)n)); } P.Add(raw[raw.Count - 1]);
+                    var g = P.Select(q => BaseHeight(q.x, q.y)).ToArray(); if (g[0] < g[g.Length - 1]) { P.Reverse(); System.Array.Reverse(g); }   // water runs downhill: start at the high end
+                    var lv = new float[P.Count]; float cur = 1e9f;
+                    for (int i = 0; i < P.Count; i++) { cur = Mathf.Min(cur, g[i] - .3f); lv[i] = Mathf.Max(cur, g[i] - 1.8f); cur = Mathf.Max(cur, lv[i] - .01f); }   // never climbs; a rise becomes a shallow cutting   // never climbs; a rise becomes a short cutting, not a canyon
+                    for (int it = 0; it < 3; it++) for (int i = 1; i < lv.Length - 1; i++) lv[i] = Mathf.Min(lv[i], (lv[i - 1] + lv[i] + lv[i + 1]) / 3 + .02f);
+                    brooks.Add(new Brook { p = P.ToArray(), lv = lv, w = s.w > 0 ? s.w : 3, depth = s.depth > 0 ? s.depth : .45f });
+                }
+            if (m.ponds >= 0 && !m.city && !m.range)
+            {
+                int want = m.ponds > 0 ? m.ponds : Mathf.Min(5, Mathf.RoundToInt(AreaK * (m.hasSea ? .25f : .8f))); float Hh = m.half - 60, step = 20;
+                var cand = new List<Vector3>();
+                for (float x = -Hh; x <= Hh; x += step) for (float z = -Hh; z <= Hh; z += step)
+                    {
+                        float h = BaseHeight(x, z); bool min = true;
+                        for (int i = 0; i < 12 && min; i++) { float a = i * .5236f; if (BaseHeight(x + Mathf.Sin(a) * 34, z + Mathf.Cos(a) * 34) < h + .6f) min = false; }
+                        if (!min) continue;
+                        bool bad = InRiver(x, z, 30) || (m.hasSea && SeaEdge(x, z) < 40) || NearRoad(x, z, 26) || NearRail(x, z, 26) || TrenchD(x, z) < 20;
+                        foreach (var p in m.points) if (FU.Hyp(x - p.x, z - p.z) < Mathf.Max(p.r, Mathf.Max(p.w, p.d) / 2) + 30) bad = true;
+                        foreach (var s in m.spawn) if (FU.Hyp(x - s.x, z - s.z) < 70) bad = true;
+                        foreach (var b in m.build) if (FU.Hyp(x - b.x, z - b.z) < 32) bad = true;
+                        foreach (var v in m.villages) if (FU.Hyp(x - v.x, z - v.z) < v.r + 30) bad = true;
+                        if (!bad) cand.Add(new Vector3(x, h, z));
+                    }
+                foreach (var c in cand.OrderBy(c => c.y))
+                {
+                    if (ponds.Count >= want) break; if (ponds.Any(p => FU.Hyp(p.x - c.x, p.z - c.z) < 120)) continue;
+                    float r = 10 + R.Next() * 12, rim = 1e9f; for (int i = 0; i < 16; i++) { float a = i * .3927f; rim = Mathf.Min(rim, BaseHeight(c.x + Mathf.Sin(a) * (r + 2), c.z + Mathf.Cos(a) * (r + 2))); }
+                    float level = Mathf.Min(c.y + .5f, rim - .15f); if (level < c.y + .15f) continue;   // the hollow must actually hold water
+                    ponds.Add(new Pond { x = c.x, z = c.z, r = r, level = level, depth = .7f + R.Next() * .5f });   // knee to waist deep: wadeable
+                }
+            }
+            carving = true;
+        }
 
         public static float H(float x, float z)
         {
@@ -221,8 +347,8 @@ namespace FallWeiss
             return Mathf.Lerp(Mathf.Lerp(HG[i], HG[i + 1], tx), Mathf.Lerp(HG[i + HN], HG[i + HN + 1], tx), tz);
         }
         public static float Slope(float x, float z) => FU.Hyp(H(x + 1.5f, z) - H(x - 1.5f, z), H(x, z + 1.5f) - H(x, z - 1.5f)) / 3;
-        public static bool InWater(float x, float z) => WL.HasValue && H(x, z) < WL.Value - .35f;
-        public static bool Blocked(float x, float z) => InWater(x, z) && BridgeAt(x, z) == 0;
+        public static bool InWater(float x, float z) => Depth(x, z) > .35f;
+        public static bool Blocked(float x, float z) => Depth(x, z) > .9f;   // vehicle fording limit (men: see BlockedFor)
 
         static bool ClearOfKey(float x, float z, float m)
         {
@@ -232,7 +358,13 @@ namespace FallWeiss
         }
         static bool NearRoad(float x, float z, float m) { foreach (var r in M.roads) if (FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2) < r.w / 2 + m) return true; return false; }
         public static bool InBuilding(float x, float z, float m) { foreach (var b in obst) if (!b.dead && !b.low && !b.soft && x > b.x0 - m && x < b.x1 + m && z > b.z0 - m && z < b.z1 + m) return true; foreach (var bd in Interiors.bds) if (bd.alive && x > bd.x0 - m && x < bd.x1 + m && z > bd.z0 - m && z < bd.z1 + m) return true; return false; }
-        static bool InRiver(float x, float z, float m) => M.hasRiver ? Mathf.Abs(z - M.RiverC(x)) < M.rw * 3.4f + m : M.hasSea ? SeaEdge(x, z) < 5 + m : false;
+        static bool InRiver(float x, float z, float m)
+        {
+            if (M.hasRiver ? Mathf.Abs(z - M.RiverC(x)) < M.rw * 3.4f + m : M.hasSea && SeaEdge(x, z) < 5 + m) return true;
+            foreach (var p in ponds) if (FU.Hyp(x - p.x, z - p.z) < p.r + 3 + m) return true;
+            foreach (var b in brooks) for (int i = 0; i < b.p.Length - 1; i++) if (FU.SegD(x, z, b.p[i].x, b.p[i].y, b.p[i + 1].x, b.p[i + 1].y) < b.w / 2 + 2.5f + m) return true;
+            return false;
+        }
         static bool NearRail(float x, float z, float m) { foreach (var r in M.rails) if (FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2) < m) return true; return false; }
 
         // ---------------- building table (port of KIND) ----------------
@@ -281,8 +413,9 @@ namespace FallWeiss
             var R = new Rng(m.seed); float Hh = m.half;
             int defend = 1 - m.attacker;
 
-            foreach (var p in m.points) { points.Add(new CapPoint { n = p.n, x = p.x, z = p.z, r = p.r > 0 ? p.r : 14, owner = defend, inside = p.inside }); if (!(m.hasRiver && BridgeAt(p.x, p.z) > 0)) AddZone(p.x, p.z, 10, 26); }
+            foreach (var p in m.points) { points.Add(new CapPoint { n = p.n, x = p.x, z = p.z, r = p.w > 0 && p.d > 0 ? Mathf.Max(p.w, p.d) / 2 : p.r > 0 ? p.r : 14, owner = defend, inside = p.inside, rect = p.w > 0 && p.d > 0, hw = p.w / 2, hd = p.d / 2, rot = p.rot, key = p.key }); if (!(m.hasRiver && BridgeAt(p.x, p.z) > 0)) AddZone(p.x, p.z, 10, 26); }
             foreach (var s in m.spawn) AddZone(s.x, s.z, 24, 34);
+            PlaceWater(m, R);
 
             var specs = new List<Spec>();
             void SpecB(float cx, float cz, float w, float d, float h, int wall, int roof, bool pitched, float hp, string k)
@@ -341,7 +474,7 @@ namespace FallWeiss
                 trees.Add(new Tree { x = x, z = z, s = .8f + R.Next() * .7f, k = R.Next() < .3f ? 1 : 0 });
             }
             foreach (var fo in m.forests) for (int i = 0; i < fo.n; i++) { float a = R.Next() * 6.28f, d = Mathf.Sqrt(R.Next()) * fo.r; AddT(fo.x + Mathf.Cos(a) * d, fo.z + Mathf.Sin(a) * d); }
-            int lone = m.city ? 30 : 60; for (int i = 0; i < lone; i++) AddT((R.Next() - .5f) * 2 * (Hh + 20), (R.Next() - .5f) * 2 * (Hh + 20));
+            int lone = Mathf.RoundToInt((m.city ? 30 : 60) * AreaK); for (int i = 0; i < lone; i++) AddT((R.Next() - .5f) * 2 * (Hh + 20), (R.Next() - .5f) * 2 * (Hh + 20));
             foreach (var o in m.orchards) for (float x = o.x - o.w / 2; x <= o.x + o.w / 2; x += 6) for (float z = o.z - o.d / 2; z <= o.z + o.d / 2; z += 6)
                     {
                         if (!ClearOfKey(x, z, 14) || NearRoad(x, z, 4) || InBuilding(x, z, 3) || InRiver(x, z, 4)) continue;
@@ -369,6 +502,7 @@ namespace FallWeiss
             if (m.hasShip) Ship(mb);
             Water();
             foreach (var b in obst) MakeCollider(b);
+            FitZones();
             Flags();
         }
 
@@ -384,13 +518,13 @@ namespace FallWeiss
             {
                 float t0 = i / (float)n, t1 = (i + 1) / (float)n, ax = s.x1 + lx * t0, az = s.z1 + lz * t0, bx = s.x1 + lx * t1, bz = s.z1 + lz * t1;
                 var o = AddObst(Mathf.Min(ax, bx) - th / 2, Mathf.Max(ax, bx) + th / 2, Mathf.Min(az, bz) - th / 2, Mathf.Max(az, bz) + th / 2, hh, true, 60);
-                o.dead = false;
+                o.dead = false; o.kind = s.k;
             }
         }
 
         static void BakeHeights()
         {
-            float S = M.half * 2 + 400; HN = Mathf.RoundToInt(S / GS) + 1; HO = -S / 2; HG = new float[HN * HN];
+            GS = M.half > 360 ? 2.5f : 2; float S = M.half * 2 + 400; HN = Mathf.RoundToInt(S / GS) + 1; HO = -S / 2; HG = new float[HN * HN];
             for (int iz = 0; iz < HN; iz++) for (int ix = 0; ix < HN; ix++) HG[iz * HN + ix] = FullHeight(HO + ix * GS, HO + iz * GS);
         }
 
@@ -413,6 +547,7 @@ namespace FallWeiss
             }
             if (s > .42f) c = Color.Lerp(c, FU.Hex(0x6e6a58), Mathf.Clamp((s - .42f) * 3, 0, .85f));
             if (WL.HasValue) { if (h < WL.Value + 1.4f) c = Color.Lerp(c, FU.Hex(M.hasSea ? 0xcdbf94 : 0x6a5a3c), M.hasSea ? .85f : .6f); else if (M.hasSea && h < WL.Value + 2.8f) c = Color.Lerp(c, FU.Hex(0xcdbf94), .3f); }
+            if (ponds.Count + brooks.Count > 0) { float wy = WaterY(x, z); if (wy > -900 && h < wy + .9f) c = Color.Lerp(c, FU.Hex(0x5a5038), .65f * (1 - Mathf.Clamp01((h - wy) / .9f))); }
             foreach (var r in M.roads) { float d = FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2); if (d < r.w / 2 + 1) c = Color.Lerp(c, FU.Hex(0x7a6c52), .85f * (1 - FU.Sm(r.w / 2 - 1, r.w / 2 + 1, d))); }
             foreach (var r in M.rails) { float d = FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2); if (d < 3) c = Color.Lerp(c, FU.Hex(0x6b6558), .8f); }
             if (M.trenches != null && M.trenches.Length > 0) { float dm = TrenchD(x, z); if (dm < 3.4f) c = Color.Lerp(c, FU.Hex(0x4a3a28), .85f * (1 - FU.Sm(1.8f, 3.4f, dm))); }
@@ -464,7 +599,7 @@ namespace FallWeiss
             if (s.pitched)
             {
                 float rh = Mathf.Clamp(Mathf.Min(s.w, s.d) * (s.k == "barn" ? .3f : .42f), 1.3f, 3.8f);
-                mb.Gable(new Vector3(s.cx, y0 + s.h, s.cz), s.w, s.d, rh, 0, roof);
+                mb.Gable(new Vector3(s.cx, y0 + s.h, s.cz), s.w, s.d, rh, 0, roof); mb.GableEnds(new Vector3(s.cx, y0 + s.h, s.cz), s.w, s.d, rh, 0, wall);
                 if (s.k != "shed" && s.k != "barn") mb.Box(new Vector3(s.cx + (alongX ? s.w * .22f : 0), y0 + s.h + rh * .45f, s.cz + (alongX ? 0 : s.d * .22f)), new Vector3(.6f, rh * .8f + .7f, .6f), 0, FU.Hex(0x6a5a4a));
                 mb.Box(new Vector3(s.cx + FU.Rand(-s.w * .22f, s.w * .22f), y0 + 1.05f, s.cz + s.d / 2 + .04f), new Vector3(1.1f, 2.1f, .14f), 0, FU.Hex(0x4a3320));
             }
@@ -568,6 +703,85 @@ namespace FallWeiss
                 }
         }
 
+        /// A rotated low obstacle (sandbag wall, barricade, wreck) as a chain of short boxes that hug the visible shape:
+        /// one axis-aligned box around a diagonal wall blocks bullets and men well outside the wall itself.
+        /// ang = direction of the long axis in game space, measured from +z (atan2(dx, dz)).
+        public static List<Obst> OrientedObst(float cx, float cz, float len, float wid, float ang, float h, float hp, bool low, GameObject vis)
+        {
+            var list = new List<Obst>(); float sA = Mathf.Sin(ang), cA = Mathf.Cos(ang);
+            int n = Mathf.Max(1, Mathf.CeilToInt(len / Mathf.Max(.45f, wid * .8f))); float sl = len / n;
+            float hx = Mathf.Abs(sA) * sl / 2 + Mathf.Abs(cA) * wid / 2, hz = Mathf.Abs(cA) * sl / 2 + Mathf.Abs(sA) * wid / 2;
+            for (int i = 0; i < n; i++)
+            {
+                float t = (i + .5f) / n - .5f, x = cx + sA * len * t, z = cz + cA * len * t;
+                var o = AddObst(x - hx, x + hx, z - hz, z + hz, h, low, hp); o.y0 = H(x, z); o.y1 = o.y0 + h; o.vis = vis; list.Add(o);
+            }
+            if (list.Count > 1) foreach (var o in list) o.link = list;
+            return list;
+        }
+        /// The real footprint of a placed model, measured from its meshes in the model's own (rotated) frame.
+        static Bounds ModelExtent(GameObject go)
+        {
+            var inv = Quaternion.Inverse(go.transform.rotation); var o = go.transform.position; bool any = false; var b = new Bounds();
+            foreach (var mf in go.GetComponentsInChildren<MeshFilter>())
+            {
+                if (!mf.sharedMesh) continue; var mb = mf.sharedMesh.bounds;
+                for (int i = 0; i < 8; i++)
+                {
+                    var c = mb.center + Vector3.Scale(mb.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
+                    var p = inv * (mf.transform.TransformPoint(c) - o); if (!any) { b = new Bounds(p, Vector3.zero); any = true; } else b.Encapsulate(p);
+                }
+            }
+            return any ? b : new Bounds(Vector3.zero, new Vector3(8, 1.1f, 1.1f));
+        }
+        /// Collision that matches a placed model: the long horizontal axis becomes a chain of boxes.
+        static void ModelObst(GameObject go, float rot, float hp)
+        {
+            var e = ModelExtent(go); var ctr = go.transform.position + go.transform.rotation * e.center; bool alongX = e.size.x >= e.size.z;
+            float len = alongX ? e.size.x : e.size.z, wid = alongX ? e.size.z : e.size.x, ang = rot + (alongX ? Mathf.PI / 2 : 0);
+            OrientedObst(ctr.x, ctr.z, len, wid, ang, Mathf.Max(.6f, e.max.y), hp, true, go);
+        }
+        /// September 1939 on the ground: shell craters stitched across the attackers' approach, refugee carts and their
+        /// bundles abandoned along the roads, burnt-out vehicles in the ditches, and towns burning on the skyline.
+        static void InvasionDressing(MeshBatch mb, Rng R)
+        {
+            farSmoke.Clear(); if (M.range) return;
+            int att = M.attacker; var aS = M.spawn[att]; var dS = M.spawn[1 - att]; float Hh = M.half;
+            bool Free(float x, float z, float m) => Mathf.Abs(x) < Hh - 8 && Mathf.Abs(z) < Hh - 8 && ClearOfKey(x, z, 22) && !InBuilding(x, z, m) && !InRiver(x, z, 3) && !InWater(x, z) && TrenchD(x, z) > 4 && Slope(x, z) < .35f;
+            // craters: denser toward the Polish line, along the axis of the attack
+            int nc = M.city ? Mathf.RoundToInt(10 * AreaK) : Mathf.RoundToInt(22 * AreaK);
+            for (int i = 0; i < nc; i++)
+            {
+                float t = Mathf.Pow(R.Next(), .7f), x = Mathf.Lerp(aS.x, dS.x, t) + (R.Next() - .5f) * Hh * 1.4f, z = Mathf.Lerp(aS.z, dS.z, t) + (R.Next() - .5f) * Hh * .5f;
+                if (!Free(x, z, 2) || NearRoad(x, z, 2)) continue; float r = 1.4f + R.Next() * 2.4f, y = H(x, z);
+                mb.Cyl(new Vector3(x, y - .02f, z), r * 1.25f, r, .12f, 14, FU.Hex(0x3a3024)); mb.Cyl(new Vector3(x, y + .03f, z), r * .6f, r * .45f, .1f, 10, FU.Hex(0x221d16));
+            }
+            if (!M.city)
+            {
+                foreach (var rd in M.roads)
+                {
+                    float L = FU.Hyp(rd.x2 - rd.x1, rd.z2 - rd.z1); if (L < 80) continue; float ux = (rd.x2 - rd.x1) / L, uz = (rd.z2 - rd.z1) / L; int n = Mathf.Max(1, Mathf.RoundToInt(L / 160));
+                    for (int i = 0; i < n; i++)
+                    {   // a refugee cart pitched into the verge, bundles and a trunk spilled around it
+                        float s = (i + .3f + R.Next() * .4f) / n * L, side = R.Next() < .5f ? -1 : 1, off = rd.w / 2 + 2.2f, x = rd.x1 + ux * s - uz * off * side, z = rd.z1 + uz * s + ux * off * side;
+                        if (!Free(x, z, 3)) continue; var c = Place("cart", x, z, Mathf.Atan2(ux, uz) + side * .5f); c.transform.rotation *= Quaternion.Euler(0, 0, side * 14);
+                        for (int k = 0; k < 5; k++) { float bx = x + (R.Next() - .5f) * 5, bz = z + (R.Next() - .5f) * 5; int[] cs = { 0x6a5a44, 0x4a4e5a, 0x7a3a2a, 0x8a8070, 0x3a3a34 }; mb.Box(new Vector3(bx, H(bx, bz) + .2f, bz), new Vector3(.5f + R.Next() * .5f, .35f, .4f + R.Next() * .3f), R.Next() * 3, FU.Hex(cs[k])); }
+                    }
+                    for (int i = 0; i < Mathf.Max(1, n / 2); i++)
+                    {   // a burnt-out vehicle shoved off the road, still smouldering
+                        float s = R.Next() * L, side = R.Next() < .5f ? -1 : 1, off = rd.w / 2 + 3.5f, x = rd.x1 + ux * s - uz * off * side, z = rd.z1 + uz * s + ux * off * side;
+                        if (!Free(x, z, 4)) continue; Place("wreck", x, z, Mathf.Atan2(ux, uz) + side * .3f); fires.Add(new Vector3(x, H(x, z) + 1.2f, z)); bigFire.Add(false); fireObst.Add(null);
+                    }
+                }
+            }
+            // towns burning on the skyline, mostly in the Polish rear and on the flanks
+            float ax = dS.x - aS.x, az = dS.z - aS.z, al = Mathf.Max(1, FU.Hyp(ax, az)); ax /= al; az /= al;
+            for (int i = 0; i < 4; i++)
+            {
+                float side = i < 3 ? 1 : -.4f, r = Hh + 160 + R.Next() * 260, sp = (R.Next() - .5f) * Hh * 2.2f;
+                farSmoke.Add(new Vector3(ax * r * side - az * sp, 4, az * r * side + ax * sp));
+            }
+        }
         static GameObject Place(string model, float x, float z, float rot, float yOff = 0)
         {
             var go = ModelLib.Spawn(model, root); go.transform.position = new Vector3(x, H(x, z) + yOff, z); go.transform.rotation = Quaternion.Euler(0, rot * Mathf.Rad2Deg, 0); return go;
@@ -591,12 +805,12 @@ namespace FallWeiss
                 for (int j = -1; j <= 1; j++)
                 {
                     float x = p.x + ux * 13 + px * j * 9.5f, z = p.z + uz * 13 + pz * j * 9.5f; if (Bad(x, z, 2)) continue;
-                    var sv = Place("sandbags", x, z, rot); var o = AddObst(x - 2.6f, x + 2.6f, z - 2.6f, z + 2.6f, 1.1f, true, 120); Shrink(o, x, z, ux, uz, 4, .55f); o.vis = sv;
+                    var sv = Place("sandbags", x, z, rot); ModelObst(sv, rot, 120);
                 }
                 for (int j = -2; j <= 2; j++)
                 {
                     float x = p.x + ux * 25 + px * j * 8, z = p.z + uz * 25 + pz * j * 8 + FU.Rand(-2, 2); if (Bad(x, z, 2)) continue;
-                    if (j % 2 == 0) { var wv = Place("wire", x, z, rot); var o = AddObst(x - 3.5f, x + 3.5f, z - 3.5f, z + 3.5f, 1.2f, true, 60); Shrink(o, x, z, ux, uz, 3.5f, .5f); o.wire = true; o.vis = wv; }
+                    if (j % 2 == 0) { var wv = Place("wire", x, z, rot); var o = AddObst(x - 3.5f, x + 3.5f, z - 3.5f, z + 3.5f, 1.2f, true, 60); Shrink(o, x, z, ux, uz, 3.5f, .5f); o.y0 = H(x, z); o.y1 = o.y0 + 1.2f; o.wire = true; o.vis = wv; }
                     else if (R.Next() < .6f) Place("tanktrap", x, z, R.Next() * 3);
                 }
                 for (int i = 0; i < 7; i++)
@@ -613,7 +827,7 @@ namespace FallWeiss
             float fwd = M.spawn[def].z > aSp.z ? 1 : -1;
             for (int i = 0; i < 4; i++) { float x = aSp.x + (i % 2 == 1 ? 18 : -18) + FU.Rand(-3, 3), z = aSp.z - fwd * (14 + (i >> 1) * 10); if (!InWater(x, z) && !InBuilding(x, z, 3)) Place("truck_" + att, x, z, fwd > 0 ? 0 : Mathf.PI); }
             for (int i = 0; i < 2; i++) { float x = dSp.x + FU.Rand(-20, 20), z = dSp.z + FU.Rand(-10, 10); if (!InWater(x, z) && !InBuilding(x, z, 3)) Place("cart", x, z, R.Next() * 6); }
-            if (!M.city) for (int i = 0; i < 14; i++)
+            if (!M.city) for (int i = 0; i < 14 * AreaK; i++)
                 {
                     float x = (R.Next() - .5f) * 2 * M.half, z = (R.Next() - .5f) * 2 * M.half;
                     if (!ClearOfKey(x, z, 20) || NearRoad(x, z, 3) || InBuilding(x, z, 4) || InRiver(x, z, 3) || Slope(x, z) > .3f || TrenchD(x, z) < 4) continue;
@@ -624,6 +838,7 @@ namespace FallWeiss
                 var p = points[(int)(R.Next() * points.Count) % points.Count]; float a = R.Next() * 6.28f, d = 12 + R.Next() * 24, x = p.x + Mathf.Cos(a) * d, z = p.z + Mathf.Sin(a) * d;
                 if (Bad(x, z, 3)) continue; Place("wreck", x, z, R.Next() * 6); fires.Add(new Vector3(x, H(x, z) + 1.4f, z)); bigFire.Add(false); fireObst.Add(null);
             }
+            InvasionDressing(mb, R);
             var houses = new List<Spec>(); foreach (var sp in specs) if (sp.h < 12 && sp.col.hp < 1000 && sp.k != "bunker") houses.Add(sp);
             for (int i = 0; i < M.fires && houses.Count > 0; i++) { int k = (int)(R.Next() * houses.Count) % houses.Count; var hs = houses[k]; houses.RemoveAt(k); fires.Add(new Vector3(hs.cx, H(hs.cx, hs.cz) + hs.h + 1.5f, hs.cz)); bigFire.Add(true); fireObst.Add(hs.col); hs.col.smoking = true; hs.col.hp = Mathf.Min(hs.col.hp, hs.col.maxhp * .6f); }
         }
@@ -652,6 +867,26 @@ namespace FallWeiss
 
         static void Water()
         {
+            var wm = Mats.Lit(FU.Hex(0x26393a), .35f);   // still, peaty inland water: dark and only faintly reflective
+            foreach (var p in ponds)
+            {
+                var v = new List<Vector3> { new Vector3(p.x, p.level, p.z) }; var t = new List<int>(); int n = 40; float rr = p.r + 3;
+                for (int i = 0; i <= n; i++) { float a = i * 6.283f / n; v.Add(new Vector3(p.x + Mathf.Sin(a) * rr, p.level, p.z + Mathf.Cos(a) * rr)); if (i > 0) t.AddRange(new[] { 0, i, i + 1 }); }
+                var m = new Mesh(); m.SetVertices(v); m.SetTriangles(t, 0); m.RecalculateNormals(); var pg = new GameObject("Pond"); pg.transform.SetParent(root, false);
+                pg.AddComponent<MeshFilter>().sharedMesh = m; pg.AddComponent<MeshRenderer>().sharedMaterial = wm;
+            }
+            foreach (var b in brooks)
+            {
+                var v = new List<Vector3>(); var t = new List<int>(); float hw = b.w / 2 + 1.5f;
+                for (int i = 0; i < b.p.Length; i++)
+                {
+                    var d = (b.p[Mathf.Min(b.p.Length - 1, i + 1)] - b.p[Mathf.Max(0, i - 1)]).normalized; var nrm = new Vector2(-d.y, d.x) * hw;
+                    v.Add(new Vector3(b.p[i].x - nrm.x, b.lv[i], b.p[i].y - nrm.y)); v.Add(new Vector3(b.p[i].x + nrm.x, b.lv[i], b.p[i].y + nrm.y));
+                    if (i > 0) { int a = (i - 1) * 2; t.AddRange(new[] { a, a + 2, a + 1, a + 1, a + 2, a + 3, a, a + 1, a + 2, a + 1, a + 3, a + 2 }); }
+                }
+                var m = new Mesh(); m.SetVertices(v); m.SetTriangles(t, 0); m.RecalculateNormals(); var bg = new GameObject("Brook"); bg.transform.SetParent(root, false);
+                bg.AddComponent<MeshFilter>().sharedMesh = m; bg.AddComponent<MeshRenderer>().sharedMaterial = wm;
+            }
             if (!WL.HasValue) return;
             var go = GameObject.CreatePrimitive(PrimitiveType.Plane); go.name = "Water"; go.transform.SetParent(root, false);
             float S = (M.half * 2 + 400) / 10f; go.transform.localScale = new Vector3(S, 1, S); go.transform.position = new Vector3(0, WL.Value, 0);
@@ -679,6 +914,41 @@ namespace FallWeiss
             return false;
         }
 
+        /// Objectives inside a building (or keyed "building") take the building's whole footprint as their zone, so the entire
+        /// interior has to be cleared and held, not a circle around a flag.
+        static void FitZones()
+        {
+            foreach (var p in points)
+            {
+                if (p.rect || !(p.inside || p.key == "building")) continue;
+                Bd best = null; float bd = 1e9f;
+                foreach (var b in Interiors.bds) { if (!b.alive) continue; float dx = Mathf.Max(0, Mathf.Max(b.x0 - p.x, p.x - b.x1)), dz = Mathf.Max(0, Mathf.Max(b.z0 - p.z, p.z - b.z1)), d = FU.Hyp(dx, dz); if (d < bd) { bd = d; best = b; } }
+                if (best == null || bd > 12) continue;
+                float m = p.inside ? 1.2f : 4;   // a building keyed from outside includes its doorsteps and walls
+                p.x = (best.x0 + best.x1) / 2; p.z = (best.z0 + best.z1) / 2; p.rect = true; p.rot = 0; p.inside = true;
+                p.hw = (best.x1 - best.x0) / 2 + m; p.hd = (best.z1 - best.z0) / 2 + m; p.r = Mathf.Max(p.hw, p.hd);
+            }
+        }
+        /// Zone outline draped over the terrain (a flat ring floats or sinks on hilltops and large zones).
+        static Mesh ZoneOutline(CapPoint p)
+        {
+            var P = new List<Vector2>();
+            if (p.rect)
+            {
+                Vector2[] c = { p.Local2World(-p.hw, -p.hd), p.Local2World(p.hw, -p.hd), p.Local2World(p.hw, p.hd), p.Local2World(-p.hw, p.hd) };
+                for (int e = 0; e < 4; e++) { var a = c[e]; var b = c[(e + 1) % 4]; int n = Mathf.Max(2, Mathf.CeilToInt((b - a).magnitude / 1.5f)); for (int i = 0; i < n; i++) P.Add(Vector2.Lerp(a, b, i / (float)n)); }
+            }
+            else { int n = Mathf.Max(48, Mathf.CeilToInt(p.r * 6.283f / 1.5f)); for (int i = 0; i < n; i++) { float a = i * 6.283f / n; P.Add(new Vector2(p.x + Mathf.Sin(a) * p.r, p.z + Mathf.Cos(a) * p.r)); } }
+            var v = new List<Vector3>(); var t = new List<int>(); int N = P.Count; float w = Mathf.Clamp(p.r * .012f, .3f, .8f);
+            for (int i = 0; i < N; i++)
+            {
+                var a = P[(i + N - 1) % N]; var b = P[(i + 1) % N]; var dir = (b - a).normalized; var nrm = new Vector2(dir.y, -dir.x) * w; var q = P[i];
+                float y = Mathf.Max(H(q.x, q.y), WL ?? -999) + .3f;
+                v.Add(new Vector3(q.x - nrm.x, y, q.y - nrm.y)); v.Add(new Vector3(q.x + nrm.x, y, q.y + nrm.y));
+            }
+            for (int i = 0; i < N; i++) { int a = i * 2, b = ((i + 1) % N) * 2; t.AddRange(new[] { a, a + 1, b, a + 1, b + 1, b, a, b, a + 1, a + 1, b, b + 1 }); }
+            var m = new Mesh { indexFormat = IndexFormat.UInt32 }; m.SetVertices(v); m.SetTriangles(t, 0); m.RecalculateNormals(); m.RecalculateBounds(); return m;
+        }
         static void Flags()
         {
             var ringMesh = RingMesh(.92f, 1, 48);
@@ -690,8 +960,8 @@ namespace FallWeiss
                 pole.transform.localPosition = new Vector3(0, 4, 0); pole.transform.localScale = new Vector3(.24f, 4, .24f); pole.GetComponent<Renderer>().sharedMaterial = Mats.Lit(0x222222);
                 var cloth = GameObject.CreatePrimitive(PrimitiveType.Cube); Object.Destroy(cloth.GetComponent<Collider>()); cloth.transform.SetParent(g, false);
                 cloth.transform.localPosition = new Vector3(1.2f, 7, 0); cloth.transform.localScale = new Vector3(2.4f, 1.5f, .05f); p.cloth = cloth.GetComponent<Renderer>();
-                var ring = new GameObject("Ring"); ring.transform.SetParent(g, false); ring.transform.localPosition = new Vector3(0, .35f, 0); ring.transform.localScale = new Vector3(p.r, 1, p.r);
-                ring.AddComponent<MeshFilter>().sharedMesh = ringMesh; var rr = ring.AddComponent<MeshRenderer>(); rr.shadowCastingMode = ShadowCastingMode.Off; p.ring = rr;
+                var ring = new GameObject("Zone " + p.n); ring.transform.SetParent(root, false);
+                ring.AddComponent<MeshFilter>().sharedMesh = ZoneOutline(p); var rr = ring.AddComponent<MeshRenderer>(); rr.shadowCastingMode = ShadowCastingMode.Off; p.ring = rr;
             }
         }
         public static Mesh RingMesh(float r0, float r1, int seg)
@@ -706,7 +976,7 @@ namespace FallWeiss
         {
             if (root) Object.Destroy(root.gameObject);
             Interiors.Clear(); treeChunks.Clear(); chunkTrees.Clear(); dirtyChunks.Clear(); terrainMesh = null; coverDirty = true;
-            obst.Clear(); trees.Clear(); treeGrid.Clear(); points.Clear(); zones.Clear(); zoneH.Clear(); blades.Clear(); fires.Clear(); bigFire.Clear(); fireObst.Clear(); shipGuns.Clear(); ship = null; smokes.Clear();
+            obst.Clear(); trees.Clear(); treeGrid.Clear(); points.Clear(); zones.Clear(); zoneH.Clear(); blades.Clear(); fires.Clear(); bigFire.Clear(); fireObst.Clear(); shipGuns.Clear(); ship = null; smokes.Clear(); breakables.Clear();
         }
 
         /// Smoke screens (RO2-style smoke grenades): x, y, z = centre, w = current radius. Filled by Game each frame.

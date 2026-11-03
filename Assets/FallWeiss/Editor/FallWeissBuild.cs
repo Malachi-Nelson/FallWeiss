@@ -24,8 +24,9 @@ namespace FallWeissEditor
             if (Take("fallweiss_refresh.request")) { AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate); UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation(); }
             if (Take("fallweiss_play.request") && !EditorApplication.isPlaying) EditorApplication.EnterPlaymode();
             if (Take("fallweiss_stop.request") && EditorApplication.isPlaying) EditorApplication.ExitPlaymode();
-            if (!EditorApplication.isPlaying && Take("fallweiss_build.request")) EditorApplication.delayCall += Build;
+            if (!EditorApplication.isPlaying && Take("fallweiss_build.request")) Build();   // direct call: delayCall never fires while the editor sits unfocused in the background
             if (Take("fallweiss_run.request")) Run();
+            if (!EditorApplication.isPlaying && Take("fallweiss_fortify.request")) { string r; try { r = ObjectiveFortifier.Run(false); } catch (System.Exception e) { r = "EXCEPTION: " + e; } File.WriteAllText(R("fallweiss_fortify.txt"), System.DateTime.Now + "\n" + r + "\n"); }
         }
         static FallWeissBuild()
         {

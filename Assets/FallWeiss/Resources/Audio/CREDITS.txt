@@ -1,0 +1,15 @@
+Fall Weiss — sound credits
+
+Stuka siren (siren/)
+  "Stuka Siren Sound" by Orange Free Sounds — http://www.orangefreesounds.com/
+  Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0)
+  https://creativecommons.org/licenses/by/4.0/  — trimmed and level-normalised.
+
+Tank gun (cannon/)
+  "Tank gunfire" (Pixabay #496032, #496050) by magiaz — Pixabay Content License (no attribution required).
+
+All other sounds
+  Cut from the Sonniss #GameAudioGDC bundles (2015-2026), royalty-free under the Sonniss GDC licence:
+  commercial use allowed, no attribution required, raw files may not be redistributed.
+  Recordings by Pole Position Production, Super Thump, Fascinated Sound, Bluezone, Stefano Cremona,
+  Lukas Tvrdon, Airborne Sound, Gladestock Studios, PMSFX, Wav Junction, Systematic Sound and others.

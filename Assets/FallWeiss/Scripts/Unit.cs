@@ -8,7 +8,7 @@ namespace FallWeiss
 {
     /// Attached to unit hit colliders so raycasts can find the unit (and tell head from body).
     public enum HitZone { Body, Head, Chest, Stomach, Arm, Leg }
-    public class UnitHit : MonoBehaviour { public Unit u; public bool head; public HitZone zone = HitZone.Body; }
+    public class UnitHit : MonoBehaviour { public Unit u; public bool head; public HitZone zone = HitZone.Body; public bool fitted; }   // fitted: sized from the model mesh, not the default table
 
     public class Order { public float x, z, cx = float.NaN, cz = float.NaN; public bool force, fast, cover; public Vector3 C => float.IsNaN(cx) ? new Vector3(x, 0, z) : new Vector3(cx, 0, cz); }
 
@@ -20,7 +20,7 @@ namespace FallWeiss
         public int burst, kills, vet, stance, slot;
         public Unit target, focus, lastAtt;
         public Order order; public List<Order> queue = new List<Order>();
-        public Vector2 home; public Vector3? detour; float detourT; public RoutePlan rp; public Hide hide; public float hideCd, bandaging, cd2, heat; public int bandages = 2, smoke; public float barrelT; public bool overheated;
+        public Vector2 home; public Vector3? detour; float detourT; public RoutePlan rp; public Hide hide; public float hideCd, bandaging, cd2, heat; public int secure = -1; public float[] wounds = new float[6]; public int bandages = 2, smoke, cls = -1; public float barrelT; public bool overheated;   // cls: index into Defs.CLASSES when deployed by the player
         // player weapon state
         public string[] weps; public int wi; public Dictionary<string, Vector2Int> ws = new Dictionary<string, Vector2Int>();
         public int clip, reserve, gren; public float reload, gcd;
@@ -57,6 +57,7 @@ namespace FallWeiss
         public float prot; public bool visible = true; public float seenT = -99; Renderer[] rends;
         // POLYGON soldier model (infantry). The procedural model stays underneath as the hit-box skeleton, renderers off.
         public SoldierVisual sv; public float lastShot = -99; float svShot = -99;
+        public Transform muzzleT;   // v4 models: marker at the real muzzle of the carried weapon (flashes / tracers start here)
         public float tankSp, coaxCd, crushX = float.NaN, crushZ; public int coaxBurst;
         public string ModelWeapon() { var w = Weapon; if (w != null) return w.id; var l = officer ? Defs.OfficerLoadout(team) : Defs.Loadout(team, type); return l != null && l.Length > 0 ? l[0] : ""; }
 
@@ -78,7 +79,9 @@ namespace FallWeiss
                 lay = ModelLib.Find(t, "lay"); hip = ModelLib.Find(t, "hip"); upper = ModelLib.Find(t, "upper"); headT = ModelLib.Find(t, "head"); gear = ModelLib.Find(t, "gear"); weaponT = ModelLib.Find(t, "weapon");
                 legs = new[] { ModelLib.Find(t, "leg0"), ModelLib.Find(t, "leg1") }; knees = new[] { ModelLib.Find(t, "knee0"), ModelLib.Find(t, "knee1") }; arms = new[] { ModelLib.Find(t, "arm0"), ModelLib.Find(t, "arm1") };
                 string v = Variant(); wpP = v == "mg" ? -.04f : v == "assault" ? (team == 0 ? -.08f : -.06f) : -.1f;
-                AddHitBox(upper, new Vector3(0, .5f, 0), new Vector3(.5f, .4f, .38f), HitZone.Chest); AddHitBox(upper, new Vector3(0, .14f, 0), new Vector3(.46f, .32f, .36f), HitZone.Stomach); AddHitBox(hip, new Vector3(0, -.45f, 0), new Vector3(.42f, .95f, .36f), HitZone.Leg); AddHead(headT, new Vector3(0, .12f, 0), .15f);
+                if (!AddModelHits(t)) { AddHitBox(upper, new Vector3(0, .5f, 0), new Vector3(.5f, .4f, .38f), HitZone.Chest); AddHitBox(upper, new Vector3(0, .14f, 0), new Vector3(.46f, .32f, .36f), HitZone.Stomach); AddHitBox(hip, new Vector3(0, -.45f, 0), new Vector3(.42f, .95f, .36f), HitZone.Leg); AddHead(headT, new Vector3(0, .12f, 0), .15f); }
+                muzzleT = ModelLib.Find(t, "muzzle");
+                if (muzzleT) wpP = 0;   // v4 models: the gun is modelled where the hands hold it, so it must not tilt away from them
             }
             else
             {
@@ -86,7 +89,7 @@ namespace FallWeiss
                 legs = lst.ToArray(); turret = ModelLib.Find(t, "turret"); if (turret) turretBase = turret.localRotation;
                 if (def.kind == "tank") AddHitBox(t, new Vector3(0, 1.2f, 0), new Vector3(2.8f, 2.4f, 4.8f));
                 else if (def.kind == "gun") AddHitBox(t, new Vector3(0, .8f, -.2f), new Vector3(2.0f, 1.6f, 2.6f));
-                else { AddHitBox(t, new Vector3(0, 1.4f, 0), new Vector3(1f, 2.4f, 2.4f)); AddHead(t, new Vector3(0, 2.75f, -.1f), .2f); }
+                else if (!AddModelHits(t)) { AddHitBox(t, new Vector3(0, 1.4f, 0), new Vector3(1f, 2.4f, 2.4f)); AddHead(t, new Vector3(0, 2.75f, -.1f), .2f); }
             }
             if (!ringMesh) ringMesh = World.RingMesh(.85f, 1, 32);
             ring = new GameObject("SelRing"); ring.transform.SetParent(t, false); ring.transform.localPosition = new Vector3(0, .15f, 0);
@@ -111,6 +114,22 @@ namespace FallWeiss
         {
             if (!p) return; var g = new GameObject("Hit"); g.transform.SetParent(p, false); g.transform.localPosition = c;
             var bc = g.AddComponent<BoxCollider>(); bc.size = s; bc.isTrigger = true; var h = g.AddComponent<UnitHit>(); h.u = this; h.zone = z;
+        }
+        /// v4 models carry their own hit volumes: empty nodes named hit_* whose position / rotation / scale are the box
+        /// (unit cube) or, for hit_head, the sphere (unit diameter). They follow the animated pivots they hang on.
+        bool AddModelHits(Transform root)
+        {
+            var list = new List<Transform>();
+            foreach (var tr in root.GetComponentsInChildren<Transform>(true)) if (tr.name.StartsWith("hit_")) list.Add(tr);
+            foreach (var tr in list)
+            {
+                string n = tr.name;
+                var zn = n.Contains("head") || n.Contains("helmet") ? HitZone.Head : n.Contains("chest") ? HitZone.Chest : n.Contains("stomach") ? HitZone.Stomach : n.Contains("arm") ? HitZone.Arm : n.Contains("leg") || n.Contains("knee") ? HitZone.Leg : HitZone.Body;
+                if (n.StartsWith("hit_head")) { var sc = tr.gameObject.AddComponent<SphereCollider>(); sc.radius = .5f; sc.isTrigger = true; }
+                else { var bc = tr.gameObject.AddComponent<BoxCollider>(); bc.size = Vector3.one; bc.isTrigger = true; }
+                var h = tr.gameObject.AddComponent<UnitHit>(); h.u = this; h.zone = zn; h.head = zn == HitZone.Head; h.fitted = true;
+            }
+            return list.Count > 0;
         }
         void AddHead(Transform p, Vector3 c, float r)
         {
@@ -162,6 +181,14 @@ namespace FallWeiss
                     proneK = Mathf.Lerp(proneK, stance == 2 ? 1 : 0, Mathf.Min(1, dt * 5)); crK = Mathf.Lerp(crK, stance == 1 ? 1 : 0, Mathf.Min(1, dt * 6));
                     float sw = Mathf.Sin(anim) * (sprinting ? .9f : .6f) * swA;
                     Pose(sw, crK, proneK, Mathf.Abs(Mathf.Sin(anim)) * (sprinting ? .07f : .04f) * swA, sprinting ? 1 : 0, aimP);
+                    if (!sv)
+                    {   // v4 models: NPCs run their magazines dry and reload; the gun dips and rolls while reloading and kicks on each shot
+                        bool me = Game.I && Game.I.player == this;
+                        if (!me && reload > 0) { reload -= dt; if (reload <= 0) { reload = 0; rkind = ReloadKind.None; } }
+                        float rl = reload > 0 && reloadDur > 0 ? Mathf.Sin(Mathf.Clamp01(1 - reload / reloadDur) * Mathf.PI) : 0;
+                        float kick = Mathf.Clamp01(1 - (Time.time - lastShot) / .12f);
+                        if (gear && (rl > 0 || kick > 0)) gear.localRotation = gear.localRotation * Qx(.55f * rl - .08f * kick) * Qz(.3f * rl);
+                    }
                     if (sv)
                     {
                         sv.SetWeapon(SoldierLib.WeaponKey(ModelWeapon(), type));
@@ -213,7 +240,7 @@ namespace FallWeiss
         // ---------------- movement (port of route / collide / moveUnit) ----------------
         Vector2 Route(float tx, float tz)
         {
-            var M = World.M; if (!M.hasRiver) return new Vector2(tx, tz);
+            var M = World.M; if (!M.hasRiver || (def.kind != "tank" && def.kind != "gun")) return new Vector2(tx, tz);   // men wade; vehicles still need a bridge
             float cu = M.RiverC(x), ct = M.RiverC(tx), su = Mathf.Sign(z - cu), st = Mathf.Sign(tz - ct), edge = M.rw * 1.5f + 2.5f;
             int onB = World.BridgeAt(x, z), tB = World.BridgeAt(tx, tz);
             if (su == st && !(tB > 0 && onB == 0)) return new Vector2(tx, tz);
@@ -227,6 +254,7 @@ namespace FallWeiss
         public void Collide(List<Unit> units, Unit player)
         {   // port of collide / collideB: walls only block at their own height, tanks crush wire and trees
             float r = def.r; string kind = def.kind; float hh = kind == "tank" ? 3.4f : (kind == "cav" || kind == "gun") ? 3.2f : 2.3f;
+            if (kind == "tank" && Game.I && (tankSp > .8f || moving)) { float fx = Mathf.Sin(heading) * 1.4f, fz = Mathf.Cos(heading) * 1.4f; World.BreakNear(Game.I, x + fx - r - .3f, x + fx + r + .3f, z + fz - r - .3f, z + fz + r + .3f); }
             var list = World.obst;
             for (int bi = 0; bi < list.Count; bi++)
             {
@@ -262,6 +290,13 @@ namespace FallWeiss
             float H = World.M.half; x = Mathf.Clamp(x, -H, H); z = Mathf.Clamp(z, -H, H);
         }
 
+        /// Deep water: float with the head out instead of walking along the bottom; moving through water throws spray.
+        public void Swim()
+        {
+            if (def.kind != "inf" && def.kind != "cav") return; float wy = World.WaterY(x, z); if (wy < -900) return; float d = wy - World.H(x, z);
+            if (d > World.SWIM && Interiors.At(x, z) == null) y = Mathf.Max(y, wy - World.SWIM);
+            if (d > .12f && moving && Random.value < Time.deltaTime * 4 && Game.I) Game.I.fx.Puff(new Vector3(x, wy + .05f, z), new Color(.82f, .88f, .9f, .7f), .25f, .9f, .5f, Vector3.up * .9f);
+        }
         public bool Move(float tx, float tz, float dt, float tol, float spMul, List<Unit> units, Unit player)
         {   // port of moveUnit: river bridges -> building doors/stairs -> around buildings
             float gt = Game.I ? Game.I.t : 0;
@@ -270,7 +305,7 @@ namespace FallWeiss
             if (detour.HasValue) { detourT -= dt; var dv = detour.Value; if (detourT <= 0 || FU.Hyp(dv.x - x, dv.z - z) < 1.5f) detour = null; else { tx = dv.x; tz = dv.z; } }
             float dx = tx - x, dz = tz - z, d = FU.Hyp(dx, dz);
             if (d < tol) return true;
-            float sp = def.speed * spMul * (supp > .7f ? .55f : 1) * (1 - Mathf.Clamp(World.Slope(x, z) - .25f, 0, .4f));
+            float sp = def.speed * spMul * (supp > .7f ? .55f : 1) * (1 - Mathf.Clamp(World.Slope(x, z) - .25f, 0, .4f)) * World.WadeMul(this, World.Depth(x, z));
             if (def.kind == "tank")
             {   // tracks: pivot toward the way before driving off, build speed gradually, brake harder than you accelerate
                 float turn = Mathf.Abs(FU.AngDiff(heading, Mathf.Atan2(dx, dz))), want = sp * (turn > .7f ? .2f : turn > .3f ? .6f : 1);
@@ -278,8 +313,8 @@ namespace FallWeiss
             }
             float step = Mathf.Min(d, sp * dt), ox = x, oz = z;
             x += dx / d * step; z += dz / d * step; Collide(units, player);
-            if (World.Blocked(x, z)) { x = ox; z = oz; }
-            y = Interiors.SurfY(x, z, y);
+            if (World.BlockedFor(this, x, z)) { x = ox; z = oz; }
+            y = Interiors.SurfY(x, z, y); Swim();
             float moved = FU.Hyp(x - ox, z - oz); stuck = moved < step * .3f ? stuck + dt : Mathf.Max(0, stuck - dt);
             if (stuck > 3 && FU.Hyp(fx - x, fz - z) < 8) { stuck = 0; return true; }
             float tr = def.kind == "tank" ? 1.1f : 5; heading += Mathf.Clamp(FU.AngDiff(heading, Mathf.Atan2(dx, dz)), -dt * tr, dt * tr); moving = true;
@@ -321,8 +356,29 @@ namespace FallWeiss
             if (c != null) hide = new Hide { x = c.x, z = c.z, t = FU.Rand(8, 16), fire = !pinned || supp < .6f, low = c.low, trench = c.trench };
         }
 
+        public AudioSource eng; float snortT = 5;
+        /// Tank engines (Panzer III/IV recordings for the Wehrmacht's Panzer II, Renault R35 for the Polish Army, which fielded R35s in 1939)
+        /// and cavalry hoof-beats. Runs for the player's own tank or horse too, and fades the engine out when the vehicle is knocked out.
+        void Sounds(Game g, float dt)
+        {
+            string kind = def.kind; if (kind != "tank" && kind != "cav") return;
+            if (!alive) { if (eng) SoundBank.Fade(eng, dt, kind == "tank" ? 1.5f : .3f); return; }
+            if (!go) return;
+            if (!eng)
+            {
+                eng = kind == "tank" ? g.audio.Follow(team == 0 ? "tank_ger" : "tank_pol", go.transform, 1, true, 8, 320, 0) : g.audio.Follow("hooves", go.transform, 1, true, 4, 130, 0);
+                if (!eng) return; eng.volume = 0;
+            }
+            if (kind == "tank") { eng.pitch = Mathf.Lerp(eng.pitch, moving ? 1.05f : .8f, dt * 1.5f); eng.volume = Mathf.Lerp(eng.volume, moving ? .75f : .4f, dt * 2); }
+            else
+            {
+                eng.volume = Mathf.Lerp(eng.volume, moving ? (sprinting ? .75f : .55f) : 0, dt * 6); eng.pitch = Mathf.Lerp(eng.pitch, sprinting ? 1.15f : 1, dt * 3);
+                snortT -= dt; if (snortT <= 0) { snortT = Random.Range(6f, 16f); g.audio.Shot("snort", new Vector3(x, y + 1.8f, z)); }
+            }
+        }
         public void Update(Game g, float dt)
         {
+            Sounds(g, dt);
             if (!alive || this == g.player) return;
             if (dummy) { cd = 1; return; }
             Combat.Bleed(g, this, dt, true); if (!alive) return;
@@ -366,10 +422,11 @@ namespace FallWeiss
                     else if (atHide) st = !hide.fire ? 2 : hide.low ? (((g.t + id * .61f) % 4.4f) < 2.4f ? 0 : 1) : 1;
                     else if (supp > .55f) st = 2; else if (engaged) st = 1;
                 }
+                float wd = World.Depth(x, z); if (wd > .5f && st == 2) st = 1; if (wd > .86f) st = 0;   // RO2: no going prone in water, no crouching above the waist
                 stance = st;
             }
             bool hidingMove = hide != null && FU.Hyp(hide.x - x, hide.z - z) > .8f;
-            bool noFire = hidingMove || (hide != null && !hide.fire) || sprinting || rout > 0 || (hide != null && hide.low && stance == 1);
+            bool noFire = World.Depth(x, z) > World.SWIM || hidingMove || (hide != null && !hide.fire) || sprinting || rout > 0 || (hide != null && hide.low && stance == 1);
             if (tgt != null && engaged && !(forced && !def.fireOnMove) && !noFire)
             {
                 float want = Mathf.Atan2(tgt.x - x, tgt.z - z);
@@ -402,7 +459,7 @@ namespace FallWeiss
             bool hit = Random.value < p;
             if (!hit) { e.x += FU.Rand(-1.5f, 1.5f) * (1 + d / 50); e.z += FU.Rand(-1.5f, 1.5f) * (1 + d / 50); e.y += FU.Rand(-.4f, .4f); }
             if (Physics.Linecast(s, e, out var rh, ~0, QueryTriggerInteraction.Ignore)) { e = rh.point; hit = false; }
-            g.fx.Tracer(s, e); g.fx.Flash(s, .12f); g.audio.Shot("mg", s);
+            g.fx.Tracer(s, e); g.fx.Flash(s, .12f); g.audio.Shot(u.team == 0 ? "mg42" : "browning", s);
             if (hit) Bullet(g, t, u.def.mgdmg, RollZone(t), u); else { Suppress(g, e.x, e.z, u.team, .1f, 4); g.fx.Dust(e); }
         }
 
@@ -449,7 +506,7 @@ namespace FallWeiss
             if (!t.alive) return;
             if (t.def.kind != "inf") { Damage(g, t, dmg, false, false, by); return; }
             Damage(g, t, dmg * ZoneMul(z), false, z == HitZone.Head, by); onBullet?.Invoke(t, z, by);
-            if (t.alive) { t.bleed = Mathf.Min(8, t.bleed + (z == HitZone.Chest ? 5 : z == HitZone.Stomach ? 3.5f : z == HitZone.Head ? 4 : 1.1f)); t.bandT = 0; t.lastAtt = by ?? t.lastAtt; }
+            if (t.alive) { t.bleed = Mathf.Min(8, t.bleed + (z == HitZone.Chest ? 5 : z == HitZone.Stomach ? 3.5f : z == HitZone.Head ? 4 : 1.1f)); t.bandT = 0; t.lastAtt = by ?? t.lastAtt; t.wounds[(int)z] = 1; }
         }
         /// Where an AI round lands: exposed zones depend on stance (prone shows head / shoulders / arms, crouched hides the legs).
         public static HitZone RollZone(Unit t)
@@ -477,13 +534,14 @@ namespace FallWeiss
         public static void NpcFire(Game g, Unit u, Unit t)
         {
             var def = u.def; float ax = t.x - u.x, az = t.z - u.z, d = Mathf.Max(.01f, FU.Hyp(ax, az)), dx = ax / d, dz = az / d;
-            var s = new Vector3(u.x + dx * .9f, u.y + def.my * u.StM, u.z + dz * .9f);
+            var s = u.sv && u.sv.MuzzleWorld.HasValue && u.visible ? u.sv.MuzzleWorld.Value : !u.sv && u.muzzleT && u.visible ? u.muzzleT.position : new Vector3(u.x + dx * .9f, u.y + def.my * u.StM, u.z + dz * .9f);   // v4 models: the gun's muzzle marker
             float p = def.acc * (1 + .1f * u.vet) * (1 - .55f * d / def.range) * (1 - u.supp * .6f); if (t.moving) p *= .7f; if (u.moving) p *= .6f; if (t == g.player) p *= .75f; if (u.moving && def.kind == "tank") p *= .7f; if (!def.pen && t.Foot && u.Foot) p *= .75f;   // lethal zones: AI riflemen trade fewer hits
             p = Mathf.Clamp(p, .05f, .95f);
             bool hit = Random.value < p; var e = new Vector3(t.x, t.y + t.def.ty * t.StM, t.z);
             if (!hit) { e.x += FU.Rand(-2, 2) * (1 + d / 40); e.z += FU.Rand(-2, 2) * (1 + d / 40); e.y += FU.Rand(-.6f, .6f); }
             if (Physics.Linecast(s, e, out var rh, ~0, QueryTriggerInteraction.Ignore)) { e = rh.point; hit = false; }
-            g.fx.Tracer(s, e); g.fx.Flash(s, .25f);
+            NearMiss(g, u, s, e, hit ? t : null);
+            g.fx.Tracer(s, e); g.fx.MuzzleFlash(s, e - s, def.pen ? 1.2f : .3f);
             bool big = def.pen;
             if (hit)
             {
@@ -498,6 +556,15 @@ namespace FallWeiss
                 u.heat = Mathf.Min(1, u.heat + .05f);
                 if (u.heat >= 1) { u.heat = 0; u.cd = Mathf.Max(u.cd, 5.5f); if (u.team == g.ME && Random.value < .3f) g.Msg(Defs.NAMES[u.team][u.type] + " is changing a hot barrel."); }
             }
+            if (!u.sv && u.Foot && u.def.kind == "inf" && Defs.WEAPONS.TryGetValue(u.ModelWeapon(), out var mw) && mw.clip > 0)
+            {   // v4 models: same magazine / clip / belt sizes and reload times as the player's weapons
+                if (u.npcAmmo < 0) u.npcAmmo = mw.clip;
+                if (--u.npcAmmo <= 0)
+                {
+                    float rt = mw.reload * Random.Range(.9f, 1.15f); u.npcAmmo = mw.clip;
+                    u.reload = u.reloadDur = rt; u.rkind = mw.vm == "rifle" || mw.vm == "sniper" ? ReloadKind.Stripper : ReloadKind.Mag; u.cd = Mathf.Max(u.cd, rt + .3f);
+                }
+            }
             if (u.sv)
             {   // infantry with a modelled weapon run dry and reload (stripper clip / magazine / belt), which costs them time
                 if (u.npcAmmo < 0) u.npcAmmo = Unit.Capacity(u.sv.weapon);
@@ -507,7 +574,25 @@ namespace FallWeiss
                     u.reload = u.reloadDur = rt; u.rkind = u.sv.weapon == "K98" ? ReloadKind.Stripper : ReloadKind.Mag; u.cd = Mathf.Max(u.cd, rt + .3f);
                 }
             }
-            g.audio.Shot(big ? "cannon" : def.mg ? "mg" : "rifle", s);
+            g.audio.Shot(big ? "cannon" : NpcSnd(u), s);
+        }
+        /// A round passing within ~3 m of the player cracks past his head (supersonic snap), from the closest point of its path.
+        static void NearMiss(Game g, Unit u, Vector3 s, Vector3 e, Unit struck)
+        {
+            var p = g.player; if (p == null || !p.alive || p.team == u.team || struck == p || u.def.pen) return;
+            var se = e - s; float L2 = se.sqrMagnitude; if (L2 < 25) return;
+            var pe = p.Eye; float tt = Vector3.Dot(pe - s, se) / L2; if (tt < .1f || tt > 1.02f) return;
+            var cp = s + se * Mathf.Clamp01(tt); if ((cp - pe).sqrMagnitude < 9) g.audio.Shot("crack", cp);
+        }
+        /// Which recording an AI shooter uses: Germans K98k / MP 40 / MG 34 (MG 42 recordings) / P38, Poles wz.29 Mauser / ckm wz.30 (Browning) / Vis.
+        static string NpcSnd(Unit u)
+        {
+            if (!u.sv && Defs.WEAPONS.TryGetValue(u.ModelWeapon(), out var wd) && !string.IsNullOrEmpty(wd.snd)) return wd.snd;   // v4 models: the carried weapon's own sound, same key the player's copy uses
+            if (u.def.mg) return u.team == 0 ? "mg42" : "browning";
+            string w = u.sv ? u.sv.weapon : null;
+            if (w == "MP40" || w == "STG44") return "mp40";
+            if (w == "Luger") return u.team == 0 ? "p38" : "pistol";
+            return "k98";
         }
 
         public static void Suppress(Game g, float x, float z, int team, float amt, float r)
@@ -515,6 +600,7 @@ namespace FallWeiss
             foreach (var u in g.units) { if (!u.alive || u.team == team) continue; if (Mathf.Abs(u.x - x) < r && Mathf.Abs(u.z - z) < r) u.supp = Mathf.Min(1, u.supp + amt); }
         }
 
+        static float painT;
         public static void Damage(Game g, Unit t, float dmg, bool pen, bool head, Unit by, bool splash = false)
         {
             if (!t.alive || g.IsProt(t)) return;
@@ -534,6 +620,10 @@ namespace FallWeiss
             else if (pen && !splash) dmg *= .7f;
             if (t.Foot) t.mor = Mathf.Max(0, t.mor - dmg * .18f * (1 - .12f * t.vet));
             t.hp -= dmg; t.supp = Mathf.Min(1, t.supp + .1f); t.lastHit = g.t; if (by != null && by.alive) t.lastAtt = by;
+            if (t.def.kind == "inf" && !head && t != g.player && Time.time - painT > .6f && Random.value < .55f)
+            {   // a wounded man close by cries out (wordless shouts only, no language); headshots kill silently, and a cooldown stops a chorus
+                var cm = Camera.main; if (cm && (cm.transform.position - t.Eye).sqrMagnitude < 35 * 35) { painT = Time.time; g.audio.Shot("pain", t.Eye); }
+            }
             if (by == g.player && t.team != g.ME) g.HitMarker(t.hp <= 0, head);
             if (t == g.player) g.DamageFlash(splash ? null : by, splash ? g.lastBoom : (Vector3?)null);
             if (t.hp <= 0) Kill(g, t, by, head);
@@ -557,12 +647,28 @@ namespace FallWeiss
             if (t == g.player && by != null && by != t) g.Msg("Killed by " + Defs.NAMES[by.team][by.type] + (head ? " — headshot" : "") + " at " + range + " m");
             if (t.team != g.ME && t.def.kind == "inf" && Random.value < .2f) g.DropPickup(t.x, t.z);
             t.SetVisible(true, true);
-            if (t.def.kind == "tank" || t.def.kind == "gun")
-            {
-                foreach (var r in t.go.GetComponentsInChildren<Renderer>()) if (r.gameObject != t.ring) r.sharedMaterial = Mats.Burnt; g.AddFire(new Vector3(t.x, t.y + 1.4f, t.z), 30);
-                g.fx.Explosion(new Vector3(t.x, t.y + 1, t.z), 4); g.audio.Shot("boom", new Vector3(t.x, t.y, t.z));
-            }
+            if (t.def.kind == "tank" || t.def.kind == "gun") Wreck(g, t);
             if (t == g.player) g.OnPlayerDeath();
+        }
+
+        /// RO2 vehicle death: the hull goes burnt-out black; if the ammunition cooks off the turret is blown off as a
+        /// separate physics piece, otherwise it is left knocked askew. The wreck burns for minutes, not seconds.
+        public static bool forceCookOff;   // test hook (dbg cookoff)
+        static void Wreck(Game g, Unit t)
+        {
+            foreach (var r in t.go.GetComponentsInChildren<Renderer>()) if (r.gameObject != t.ring) r.sharedMaterial = Mats.Burnt;
+            var p = new Vector3(t.x, t.y + 1.4f, t.z); bool cookOff = t.def.kind == "tank" && t.turret && (forceCookOff || Random.value < .4f); forceCookOff = false;
+            g.fx.Explosion(new Vector3(t.x, t.y + 1, t.z), cookOff ? 7 : 4); g.audio.Shot("boom", p);
+            if (cookOff)
+            {
+                var tr = t.turret; t.turret = null; tr.SetParent(World.root, true);
+                var b = new Bounds(tr.position, Vector3.zero); bool has = false; foreach (var r in tr.GetComponentsInChildren<Renderer>()) { if (!has) { b = r.bounds; has = true; } else b.Encapsulate(r.bounds); }
+                var bc = tr.gameObject.AddComponent<BoxCollider>(); var ls = tr.lossyScale; bc.center = tr.InverseTransformPoint(b.center); bc.size = new Vector3(b.size.x / Mathf.Max(.01f, ls.x), b.size.y / Mathf.Max(.01f, ls.y), b.size.z / Mathf.Max(.01f, ls.z)) * .8f;
+                var rb = tr.gameObject.AddComponent<Rigidbody>(); rb.mass = 800; rb.linearVelocity = Vector3.up * Random.Range(7f, 10f) + new Vector3(Random.Range(-3f, 3f), 0, Random.Range(-3f, 3f)); rb.angularVelocity = Random.insideUnitSphere * 2.5f;
+                g.AddFire(p, 180); g.AddFire(p + Vector3.up * .6f, 180);
+                if (g.player != null && g.player.alive && FU.Hyp(g.player.x - t.x, g.player.z - t.z) < 220) g.Msg("Ammunition cook-off — the turret is blown clean off!");
+            }
+            else { t.turretH = t.heading + Random.Range(-1.4f, 1.4f); g.AddFire(p, 120); }
         }
 
         public static void Explode(Game g, Vector3 p, float r, float dmg, int srcTeam, Unit skip, Unit by)
