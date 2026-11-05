@@ -2167,24 +2167,24 @@ namespace FallWeiss
                 var o0 = new Vector3(u.x, u.y + 1.5f, u.z); float dx = tx - o0.x, dz = tz - o0.z, L = FU.Hyp(dx, dz), ang = 40 * Mathf.Deg2Rad, dy = World.H(tx, tz) - o0.y;
                 float v2 = 22 * L * L / (2 * Mathf.Cos(ang) * Mathf.Cos(ang) * Mathf.Max(1, L * Mathf.Tan(ang) - dy)), v = Mathf.Min(s.speed * 1.05f, Mathf.Sqrt(Mathf.Max(1, v2)));
                 var gv = new Vector3(dx / L * Mathf.Cos(ang) * v, Mathf.Sin(ang) * v, dz / L * Mathf.Cos(ang) * v);
-                if (!ArcClear(o0, gv)) { u.gcd = 2; continue; }   // a parapet, wall or window frame in the way: the grenade would bounce back among his own section (telemetry: most friendly kills were men 1–5 m from a thrower)
+                var land = Landing(o0, gv);   // fly the whole throw first: a parapet or window frame in the way, or a throw up a bank that falls short, puts the grenade among his own section (telemetry: every friendly kill left was a grenade)
+                if (FU.Hyp(land.x - tx, land.z - tz) > 4.5f || units.Any(o => o.alive && o.team == u.team && FU.Hyp(o.x - land.x, o.z - land.z) < 8)) { u.gcd = 2; continue; }
                 AddGrenade(u, o0, gv, s.fuse - cook);
                 u.gren--; u.gcd = FU.Rand(10, 18); u.lastShot = Time.time; Bark(u, "grenade", .9f);
                 if (tg == player || FU.Hyp(tg.x - (player != null ? player.x : 1e6f), tg.z - (player != null ? player.z : 1e6f)) < 10) Msg(u.team == 0 ? "\u201eHandgranate!\u201c — grenade incoming!" : "\u201eGranat!\u201d — grenade incoming!");
             }
         }
-        /// Flies the first 8 m of a throw with the same gravity and ray tests as UpdateGrenades: false if it would strike something close to the thrower.
-        static bool ArcClear(Vector3 p, Vector3 v)
+        /// Flies a throw with the same gravity and ray tests as UpdateGrenades and returns where it first strikes something or the ground.
+        static Vector3 Landing(Vector3 p, Vector3 v)
         {
-            var s = p;
-            for (int i = 0; i < 60; i++)
+            for (int i = 0; i < 120; i++)
             {
                 var np = p + v * .03f; v.y -= 22 * .03f;
-                if (Physics.Linecast(p, np, ~0, QueryTriggerInteraction.Ignore)) return FU.Hyp(np.x - s.x, np.z - s.z) > 8;
-                if (np.y < World.H(np.x, np.z)) return FU.Hyp(np.x - s.x, np.z - s.z) > 8;
-                p = np; if (FU.Hyp(p.x - s.x, p.z - s.z) > 8) return true;
+                if (Physics.Linecast(p, np, out var hit, ~0, QueryTriggerInteraction.Ignore)) return hit.point;
+                if (np.y < World.H(np.x, np.z)) return np;
+                p = np;
             }
-            return true;
+            return p;
         }
         void UpdateGrenades(float dt)
         {
