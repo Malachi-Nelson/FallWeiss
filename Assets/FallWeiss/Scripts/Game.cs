@@ -42,7 +42,9 @@ namespace FallWeiss
         // first person state (port of fp)
         float yaw, pitch, ads, fov = 70, recoil, bob, eye = 1.55f, swT, fireQueued, gT, lean; Vector3 tpPivot;
         public float Ads => ads;
+        float digP, digSndT, eDownT = -9;   // entrenching tool progress (seconds) and last spade sound
         public readonly Dictionary<string, int> ffLog = new Dictionary<string, int>();   // friendly kills by cause (dbg losses)
+        public readonly List<string> ffEvents = new List<string>();   // the last friendly kills, with geometry (dbg ff)
         float sens = 1, baseFov = 72;   // options (PlayerPrefs FW.Sens / FW.Fov)
         float fpsAvg = 60, fpsMin = 60, fpsMinT;
         public int[,,] killLog = new int[2, 3, 4];   // who killed whom (dbg losses)
@@ -526,7 +528,7 @@ namespace FallWeiss
 
         void ClearAll()
         {
-            System.Array.Clear(killLog, 0, killLog.Length); ffLog.Clear(); playerZero.Clear(); zeroShowT = 0;
+            System.Array.Clear(killLog, 0, killLog.Length); ffLog.Clear(); ffEvents.Clear(); playerZero.Clear(); zeroShowT = 0;
             AudioListener.pause = false; Time.timeScale = 1;   // Restart / Quit from the pause screen used to carry the paused listener into the next mission (silent until the next Esc-Esc)
             StopAllCoroutines(); spStage[0] = spStage[1] = -99; sgT.Clear();
             foreach (var u in units) if (u.go) Destroy(u.go); units.Clear(); player = lastPlayer = null; if (unitRoot) Destroy(unitRoot.gameObject);
@@ -538,7 +540,7 @@ namespace FallWeiss
             foreach (var m in markers) if (m.t) Destroy(m.t.gameObject); markers.Clear();
             foreach (var p in pings) if (p.t) Destroy(p.t.gameObject); pings.Clear(); if (spRings != null) foreach (var r in spRings) if (r) Destroy(r.gameObject); spRings = null;
             grenades.ForEach(gr => { if (gr.t) Destroy(gr.t.gameObject); }); grenades.Clear(); foreach (var r in rounds) fx.EndStreak(r.lr); rounds.Clear(); secureState.Clear(); armSecure = false; smokes.ForEach(sm => { if (sm.t) Destroy(sm.t.gameObject); }); smokes.Clear(); aiSmokeT[0] = aiSmokeT[1] = 0; shells.Clear(); fires.Clear(); selected.Clear();
-            ClearDeploy(); fx.Clear(); World.Clear();
+            ClearDeploy(); fx.Clear(); Destruction.Clear(); World.Clear();
         }
 
         float FaceEnemy(int team) { var a = M.spawn[team]; var b = M.spawn[1 - team]; return Mathf.Atan2(b.x - a.x, b.z - a.z); }
@@ -857,7 +859,7 @@ namespace FallWeiss
             if (player != null && player.alive) { resT -= dt; if (resT <= 0) { resT = 5; Resupply(player); } }
             streakT -= dt; if (streakT <= 0) streak = 0;
             audio.Tick(); UpdateRounds(dt); UpdateGrenades(dt); UpdateSmoke(dt); UpdatePickups(dt); UpdatePlanes(dt); UpdateShells(); UpdateMarkers(dt);
-            if (range == null) { Director(dt); SecureTick(dt); UpdateCapture(dt, false); SpawnGuard(dt); Raids(dt); AiGrenades(dt); } else range.Update(dt, kb); Spotting(dt); UpdateFires(dt); UpdateAmbience(dt); UpdateShipAndSky(dt); World.Tick(dt); Nav.Tick(); Burning(dt); UpdateConvoy(dt); UpdateBeams(dt); UpdatePaths(); UpdatePings(dt); szT -= dt; if (szT <= 0) { szT = .5f; UpdateSpawnZones(); } shake = Mathf.Max(0, shake - dt * 3);
+            if (range == null) { Director(dt); SecureTick(dt); UpdateCapture(dt, false); SpawnGuard(dt); Raids(dt); AiGrenades(dt); } else range.Update(dt, kb); Spotting(dt); UpdateFires(dt); Destruction.Tick(this, dt); UpdateAmbience(dt); UpdateShipAndSky(dt); World.Tick(dt); Nav.Tick(); Burning(dt); UpdateConvoy(dt); UpdateBeams(dt); UpdatePaths(); UpdatePings(dt); szT -= dt; if (szT <= 0) { szT = .5f; UpdateSpawnZones(); } shake = Mathf.Max(0, shake - dt * 3);
             foreach (var b in World.blades) if (b) b.Rotate(0, 0, -dt * 23, Space.Self);
             fx.Update(dt, cam); vis.Update(dt, t, !rts); vis.Suppression(player != null && player.alive && !rts ? player.supp : 0); UpdateInteriorLight();
             hitT -= dt; dmgT -= dt; ammoShowT -= dt; zeroShowT -= dt; for (int i = dmgSrc.Count - 1; i >= 0; i--) { dmgSrc[i].t -= dt; if (dmgSrc[i].t <= 0) dmgSrc.RemoveAt(i); }
@@ -1581,7 +1583,22 @@ namespace FallWeiss
             }
             // RO2 barrel change: an MG that overheats can't fire until the crew swaps the barrel (a few seconds, gun down)
             if (w != null && w.mg && kb.xKey.wasPressedThisFrame && u.barrelT <= 0 && u.heat > .2f) { u.barrelT = 4.5f; Msg("Changing barrel…"); }
-            if (kb.eKey.wasPressedThisFrame && !kb.leftShiftKey.isPressed && !kb.qKey.isPressed) { if (ToggleVehicle()) return; }   // E: climb out of / into a vehicle (T27); Q/E lean still works
+            // E is also lean-right (held): a quick tap (< .22 s) climbs in / out of a vehicle, so leaning beside a tank never puts you in it
+            if (kb.eKey.wasPressedThisFrame) eDownT = Time.unscaledTime;
+            if (kb.eKey.wasReleasedThisFrame && Time.unscaledTime - eDownT < .22f && !kb.leftShiftKey.isPressed && !kb.qKey.isPressed) { if (ToggleVehicle()) return; }
+            // T32 entrenching tool: hold Y, crouched or prone and still, to dig a slit trench facing the enemy (Polish infantry)
+            if (kb.yKey.isPressed && foot)
+            {
+                string why = FieldWorks.WhyNot(u);
+                if (why != null) { if (kb.yKey.wasPressedThisFrame) Msg(why); digP = 0; }
+                else
+                {
+                    digP += dt; u.cd = Mathf.Max(u.cd, .3f);
+                    if (Time.time - digSndT > .8f) { digSndT = Time.time; audio.Shot("dig", new Vector3(u.x, u.y + .2f, u.z), 1, true); }
+                    if (digP >= FieldWorks.PLAYER_DIG) { digP = 0; Msg(FieldWorks.Finish(u) ? "Dug in — a slit trench, facing the enemy." : "The ground won't take a trench here."); }
+                }
+            }
+            else digP = 0;   // E: climb out of / into a vehicle (T27); Q/E lean still works
             if (u.barrelT > 0) { u.barrelT -= dt; if (u.barrelT <= 0) { u.heat = 0; u.overheated = false; Msg("Fresh barrel in."); } }
             mgRest = w != null && w.mg && !u.moving && foot && (st == 2 || (ads > .5f && RestedOnCover()));
             // breath holding (Shift while aiming, standing still) — port of fp.hold / fp.gasp
@@ -1612,6 +1629,11 @@ namespace FallWeiss
             {
                 cam.transform.position = new Vector3(u.x + Mathf.Cos(yaw) * lo, u.y + eye + bb - Mathf.Abs(lean) * .08f, u.z - Mathf.Sin(yaw) * lo);
                 cam.transform.rotation = Quaternion.Euler((-pitch - recoil * .6f - swy) * Mathf.Rad2Deg, (yaw + swx) * Mathf.Rad2Deg, -lean * .16f * Mathf.Rad2Deg);
+            }
+            if (debugLook.HasValue)
+            {   // test hook (dbg look x z h d): a fixed camera over a world spot, for screenshots of terrain works and ruins
+                var L = debugLook.Value; var c = new Vector3(L.x, World.H(L.x, L.y), L.y);
+                cam.transform.position = c + new Vector3(-L.w * .6f, L.z, -L.w * .6f); cam.transform.rotation = Quaternion.LookRotation(c - cam.transform.position);
             }
             if (shake > 0) cam.transform.position += Random.insideUnitSphere * shake * .12f;
             holdZ += ((hold || (mgRest && ads > .5f && kb.leftShiftKey.isPressed) ? 1 : 0) - holdZ) * Mathf.Min(1, dt * 6);
@@ -1662,7 +1684,7 @@ namespace FallWeiss
         /// POLYGON pack gun in first person (Kar98k, MP40 for the MP 38, Luger): replaces the v4 gun mesh, rear and front sight
         /// tops on the eye line (so ADS looks straight down the pack's own sights), the pack grip where the v4 wrist is; its bolt,
         /// magazine and toggle take the v4 part names so the same animations drive them. Casings and flashes use its port / muzzle.
-        Vector3? vmMuzzleLocal; float? debugOrbit; float debugOrbitD = 2.2f;
+        Vector3? vmMuzzleLocal; float? debugOrbit; float debugOrbitD = 2.2f; Vector4? debugLook;
         void MountPackViewModel(WeaponDef w)
         {
             vmMuzzleLocal = null; if (!vm || vm.childCount == 0 || w == null) return;
@@ -2058,7 +2080,11 @@ namespace FallWeiss
             AddGrenade(u, cam.transform.position + d * .8f, d * s.speed * (u.stance == 2 ? .6f : u.stance == 1 ? .85f : 1), Mathf.Max(.15f, s.fuse - cooked));
         }
         // ---------------- smoke grenades (RO2: RDG-1 / Nebelhandgranate) ----------------
-        class Smoke { public Vector3 p; public float life, age; public Transform t; public Vector3 v; public bool landed; }
+        class Smoke { public Vector3 p; public float life, age, r; public Transform t; public Vector3 v; public bool landed, dust; }
+        /// A collapse throws up a dust cloud that blocks sight like a smoke screen, at full size at once (T33).
+        public void AddDust(Vector3 p, float life, float r) { p.y = World.H(p.x, p.z); smokes.Add(new Smoke { p = p, life = life, landed = true, age = 4, r = r, dust = true }); }
+        /// Runs `a` after `s` seconds of game time (falling masonry, delayed collapses).
+        public void After(float s, System.Action a) { StartCoroutine(Later(s, a)); }
         readonly List<Smoke> smokes = new List<Smoke>();
         float[] aiSmokeT = new float[2];
         const float SmokeLife = 38, SmokeR = 7.5f;
@@ -2098,12 +2124,12 @@ namespace FallWeiss
                 if (s.life <= 0) { if (s.t) Destroy(s.t.gameObject); smokes.RemoveAt(i); continue; }
                 if (!s.landed) continue;
                 // grows over ~4 s, holds, thins out over the last 8 s
-                float r = SmokeR * Mathf.Clamp01(s.age / 4f) * Mathf.Clamp01(s.life / 8f);
+                float r = (s.r > 0 ? s.r : SmokeR) * Mathf.Clamp01(s.age / 4f) * Mathf.Clamp01(s.life / 8f);
                 World.smokes.Add(new Vector4(s.p.x, s.p.y + 1.6f, s.p.z, r));
                 if (Random.value < dt * 9)
                 {
                     var o = Random.insideUnitSphere * r * .55f; o.y = Mathf.Abs(o.y) * .5f;
-                    fx.Puff(s.p + o + Vector3.up * .5f, new Color(.78f, .78f, .76f, .55f), 2.5f, 7.5f, 4.5f, new Vector3(FU.Rand(-.4f, .4f), .5f, FU.Rand(-.4f, .4f)));
+                    fx.Puff(s.p + o + Vector3.up * .5f, s.dust ? new Color(.64f, .58f, .5f, .6f) : new Color(.78f, .78f, .76f, .55f), 2.5f, 7.5f, 4.5f, new Vector3(FU.Rand(-.4f, .4f), .5f, FU.Rand(-.4f, .4f)));
                 }
             }
         }
@@ -2140,10 +2166,25 @@ namespace FallWeiss
                 var s = Gren(u.team); float cook = s.stick ? 1.2f : .4f, tx = tg.x + FU.Rand(-2.5f, 2.5f), tz = tg.z + FU.Rand(-2.5f, 2.5f);
                 var o0 = new Vector3(u.x, u.y + 1.5f, u.z); float dx = tx - o0.x, dz = tz - o0.z, L = FU.Hyp(dx, dz), ang = 40 * Mathf.Deg2Rad, dy = World.H(tx, tz) - o0.y;
                 float v2 = 22 * L * L / (2 * Mathf.Cos(ang) * Mathf.Cos(ang) * Mathf.Max(1, L * Mathf.Tan(ang) - dy)), v = Mathf.Min(s.speed * 1.05f, Mathf.Sqrt(Mathf.Max(1, v2)));
-                AddGrenade(u, o0, new Vector3(dx / L * Mathf.Cos(ang) * v, Mathf.Sin(ang) * v, dz / L * Mathf.Cos(ang) * v), s.fuse - cook);
+                var gv = new Vector3(dx / L * Mathf.Cos(ang) * v, Mathf.Sin(ang) * v, dz / L * Mathf.Cos(ang) * v);
+                if (!ArcClear(o0, gv)) { u.gcd = 2; continue; }   // a parapet, wall or window frame in the way: the grenade would bounce back among his own section (telemetry: most friendly kills were men 1–5 m from a thrower)
+                AddGrenade(u, o0, gv, s.fuse - cook);
                 u.gren--; u.gcd = FU.Rand(10, 18); u.lastShot = Time.time; Bark(u, "grenade", .9f);
                 if (tg == player || FU.Hyp(tg.x - (player != null ? player.x : 1e6f), tg.z - (player != null ? player.z : 1e6f)) < 10) Msg(u.team == 0 ? "\u201eHandgranate!\u201c — grenade incoming!" : "\u201eGranat!\u201d — grenade incoming!");
             }
+        }
+        /// Flies the first 8 m of a throw with the same gravity and ray tests as UpdateGrenades: false if it would strike something close to the thrower.
+        static bool ArcClear(Vector3 p, Vector3 v)
+        {
+            var s = p;
+            for (int i = 0; i < 60; i++)
+            {
+                var np = p + v * .03f; v.y -= 22 * .03f;
+                if (Physics.Linecast(p, np, ~0, QueryTriggerInteraction.Ignore)) return FU.Hyp(np.x - s.x, np.z - s.z) > 8;
+                if (np.y < World.H(np.x, np.z)) return FU.Hyp(np.x - s.x, np.z - s.z) > 8;
+                p = np; if (FU.Hyp(p.x - s.x, p.z - s.z) > 8) return true;
+            }
+            return true;
         }
         void UpdateGrenades(float dt)
         {
@@ -2187,6 +2228,7 @@ namespace FallWeiss
         }
         void DeadCamera(float dt)
         {
+            if (debugLook.HasValue) { var L = debugLook.Value; var c = new Vector3(L.x, World.H(L.x, L.y), L.y); cam.transform.position = c + new Vector3(-L.w * .6f, L.z, -L.w * .6f); cam.transform.rotation = Quaternion.LookRotation(c - cam.transform.position); return; }
             if (rts || lastPlayer == null) return; var p = new Vector3(lastPlayer.x, lastPlayer.y, lastPlayer.z);
             cam.transform.position = Vector3.Lerp(cam.transform.position, p + new Vector3(0, 9, -6), dt * 2); cam.transform.LookAt(p); cam.fieldOfView = 60;
         }
@@ -2363,6 +2405,30 @@ namespace FallWeiss
                 case "postoff": vis.PostOff(); return "post off";
                 case "cloudsoff": vis.CloudsOff(); return "clouds off";
                 case "losses": { var sb = new System.Text.StringBuilder(); if (ffLog.Count > 0) { sb.Append("FF by cause:"); foreach (var kv in ffLog) sb.Append(" " + kv.Key + "=" + kv.Value); sb.Append(" | "); } string[] by = { "enemy", "FRIENDLY", "none" }, wk = { "rifle", "tank", "gun", "mg/other" }; for (int tm = 0; tm < 2; tm++) { sb.Append($"T{tm} dead:"); for (int b = 0; b < 3; b++) for (int k = 0; k < 4; k++) if (killLog[tm, b, k] > 0) sb.Append($" {by[b]}/{wk[k]}={killLog[tm, b, k]}"); sb.Append(" | "); } return sb.ToString(); }
+                case "ff": return ffEvents.Count == 0 ? "none" : string.Join("\n  ", ffEvents);
+                case "works":
+                    {
+                        int tr = M.trenches != null ? M.trenches.Length : 0; int dig = units.Count(u => u.alive && u.digT > 0);
+                        // why the Polish defenders are not digging: first failing condition per man
+                        var why = new Dictionary<string, int>(); void W(string k) { why[k] = why.TryGetValue(k, out var n) ? n + 1 : 1; }
+                        foreach (var u in units) { if (!u.alive || u.team != 1 || !u.Foot || u.mount != null || u == player) continue; W(FieldWorks.AiBlock(this, u)); }
+                        return $"planned={FieldWorks.planned} parapets={FieldWorks.fireSegs.Count} trenches={tr} dugLive={World.dugCount} diggingNow={dig} applies={FieldWorks.Applies(M)} | " + string.Join(" ", why.Select(kv => kv.Key + "=" + kv.Value));
+                    }
+                case "dig": { if (player == null) return "no player"; player.SetStance(1); string why = FieldWorks.WhyNot(player); if (why != null && why != "Crouch or go prone to dig.") return "refused: " + why; return FieldWorks.Finish(player) ? "dug at " + player.x.ToString("0") + "," + player.z.ToString("0") : "refused by terrain"; }
+                case "burn":
+                case "collapse":
+                    {   // nearest intact house to the player / camera: set it alight, or bring it down
+                        var c = player != null ? new Vector3(player.x, 0, player.z) : cam.transform.position; Bd best = null; float bd = 1e9f;
+                        foreach (var b in Interiors.bds) { if (!b.alive) continue; float d = FU.Hyp(b.cx - c.x, b.cz - c.z); if (d < bd) { bd = d; best = b; } }
+                        if (best == null) return "no house"; debugLook = new Vector4(best.cx, best.cz, 18, 36); if (w[0] == "burn") { Destruction.Ignite(this, best, w.Length > 1 ? float.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture) : .6f); return $"burning house at {best.cx:0},{best.cz:0} ({bd:0} m)"; }
+                        Interiors.Collapse(this, best); return $"collapsed house at {best.cx:0},{best.cz:0} ({bd:0} m)";
+                    }
+                case "look":
+                    {   // point the camera at a world spot: dbg look x z [height] [dist]
+                        float lx = float.Parse(w[1], System.Globalization.CultureInfo.InvariantCulture), lz = float.Parse(w[2], System.Globalization.CultureInfo.InvariantCulture), hh = w.Length > 3 ? float.Parse(w[3], System.Globalization.CultureInfo.InvariantCulture) : 40, dd = w.Length > 4 ? float.Parse(w[4], System.Globalization.CultureInfo.InvariantCulture) : 50;
+                        debugLook = new Vector4(lx, lz, hh, dd); return "look " + lx + "," + lz;
+                    }
+                case "lookoff": debugLook = null; return "look off";
                 case "ai":
                     {   // AI telemetry (5 Nov): what the men near the player are doing — stance / moving / target / cover / orders — and a tally for the whole side
                         var sb = new System.Text.StringBuilder(); int tm = w.Length > 1 ? int.Parse(w[1]) : ME; int n = 0, standing = 0, crouch = 0, prone = 0, hasT = 0, inHide = 0, mov = 0, los = 0, forcedN = 0, pin = 0;
@@ -2920,6 +2986,7 @@ namespace FallWeiss
                 int zr = PlayerZero(w, false); string zs = w.melee || ZeroSteps(w, false).Length < 2 ? "" : "   " + zr + " m";
                 UI.Shadow(new Rect(W - 520, H - 62, 496, 22), w.name + zs + "     " + kit, rs, zeroShowT > 0 ? UI.Gold : UI.Dim, aW);
             }
+            if (digP > 0) UI.Shadow(new Rect(W / 2 - 200, H / 2 + 92, 400, 22), $"Digging in…  {Mathf.RoundToInt(digP / FieldWorks.PLAYER_DIG * 100)}%", UI.lineC, A(UI.Gold, .9f));
             if (w != null && w.mg && !crew && u.barrelT <= 0 && ads > .3f) UI.Shadow(new Rect(W / 2 - 150, H / 2 + 70, 300, 20), mgRest ? "BIPOD DEPLOYED" : "NOT DEPLOYED", UI.lineC, mgRest ? A(UI.Green, .7f) : A(UI.Gold, .8f));
         }
 
@@ -3093,8 +3160,8 @@ namespace FallWeiss
 
         void DrawControls(Rect r)
         {
-            string inf = "<b><color=#ffd96a>INFANTRY</color></b>\nWASD move · Shift sprint · C crouch · Z prone\nQ / E lean · LMB fire · RMB iron sights\nShift while aiming: hold breath\nR reload · K check ammo · 1–3 / wheel weapons\nPage Up / Page Down: sight range (zeroing)\nG grenade · Shift+G smoke grenade\nH bandage · T third person · L scoreboard\nMG: go prone or rest on cover to deploy,\n      X changes an overheated barrel";
-            string cmd = "<b><color=#ffd96a>COMMAND</color></b>\nV squad orders (7: secure objective) · N reinforcements\nB call support (aim at the target)\nF take control of the friendly you look at\nE climb into / out of a tank or gun (crews bail out when it is lost)\n\n<b><color=#ffd96a>COMMAND MAP</color></b>  (Tab)\nLMB select / drag · RMB move\nAlt+RMB attack-move · Ctrl+RMB fast\nShift queue · H halt · Ctrl+A all\nC + click: secure an objective\n1–6 buy units · B support strike\nF / P take control\nminimap: LMB jump · RMB order";
+            string inf = "<b><color=#ffd96a>INFANTRY</color></b>\nWASD move · Shift sprint · C crouch · Z prone\nQ / E lean · Y (hold, crouched) dig in — Polish infantry · LMB fire · RMB iron sights\nShift while aiming: hold breath\nR reload · K check ammo · 1–3 / wheel weapons\nPage Up / Page Down: sight range (zeroing)\nG grenade · Shift+G smoke grenade\nH bandage · T third person · L scoreboard\nMG: go prone or rest on cover to deploy,\n      X changes an overheated barrel";
+            string cmd = "<b><color=#ffd96a>COMMAND</color></b>\nV squad orders (7: secure objective) · N reinforcements\nB call support (aim at the target)\nF take control of the friendly you look at\nE (tap) climb into / out of a tank or gun (crews bail out when it is lost)\n\n<b><color=#ffd96a>COMMAND MAP</color></b>  (Tab)\nLMB select / drag · RMB move\nAlt+RMB attack-move · Ctrl+RMB fast\nShift queue · H halt · Ctrl+A all\nC + click: secure an objective\n1–6 buy units · B support strike\nF / P take control\nminimap: LMB jump · RMB order";
             string dep = "<b><color=#ffd96a>DEPLOYMENT</color></b>\n1–9 / Tab pick a card · LMB place · RMB face\nR rotate · X lead this section · Del lift\nV auto-place the rest · Enter begin";
             float cw = (r.width - 24) / 2; GUI.Label(new Rect(r.x, r.y + 8, cw, r.height - 16), inf + "\n\n" + dep, UI.small); GUI.Label(new Rect(r.x + cw + 24, r.y + 8, cw, r.height - 16), cmd, UI.small);
         }

@@ -227,12 +227,37 @@ namespace FallWeiss
         }
 
         // ---------------- terrain shape ----------------
+        /// Distance to the nearest trench, exact up to 24 m (1e9 beyond: every caller asks "closer than 3–20 m?"). Segments are
+        /// bucketed in 16 m cells, rebuilt when the trench list changes (a new map, a dug foxhole): the terrain bake calls this twice
+        /// per vertex (~300 k) and the planned field works roughly doubled the segment count.
         public static float TrenchD(float x, float z)
         {
-            float d = 1e9f; if (M.trenches == null) return d;
-            foreach (var t in M.trenches) for (int i = 0; i + 3 < t.pts.Length; i += 2) d = Mathf.Min(d, FU.SegD(x, z, t.pts[i], t.pts[i + 1], t.pts[i + 2], t.pts[i + 3]));
-            return d;
+            float d = 1e9f; if (M == null || M.trenches == null || M.trenches.Length == 0) return d;
+            if (!ReferenceEquals(tGridSrc, M.trenches)) BuildTrenchGrid();
+            int cx = Mathf.FloorToInt(x / TGC), cz = Mathf.FloorToInt(z / TGC);
+            for (int i = -1; i <= 1; i++) for (int j = -1; j <= 1; j++)
+                    if (tGrid.TryGetValue(((long)(cx + i) << 32) ^ (uint)(cz + j), out var l)) foreach (var s in l) d = Mathf.Min(d, FU.SegD(x, z, s.x, s.y, s.z, s.w));
+            return d < 24 ? d : 1e9f;
         }
+        const float TGC = 24; static FTrench[] tGridSrc; static readonly Dictionary<long, List<Vector4>> tGrid = new Dictionary<long, List<Vector4>>();
+        static void BuildTrenchGrid()
+        {
+            tGrid.Clear(); tGridSrc = M.trenches;
+            foreach (var t in M.trenches) for (int i = 0; i + 3 < t.pts.Length; i += 2)
+                {
+                    var s = new Vector4(t.pts[i], t.pts[i + 1], t.pts[i + 2], t.pts[i + 3]);
+                    int x0 = Mathf.FloorToInt(Mathf.Min(s.x, s.z) / TGC), x1 = Mathf.FloorToInt(Mathf.Max(s.x, s.z) / TGC), z0 = Mathf.FloorToInt(Mathf.Min(s.y, s.w) / TGC), z1 = Mathf.FloorToInt(Mathf.Max(s.y, s.w) / TGC);
+                    for (int a = x0; a <= x1; a++) for (int b = z0; b <= z1; b++) { long k = ((long)a << 32) ^ (uint)b; if (!tGrid.TryGetValue(k, out var l)) tGrid[k] = l = new List<Vector4>(); l.Add(s); }
+                }
+        }
+        /// The trench cut (1.8 m deep, spoil on both lips). Applied after the objective / building pads are levelled — it used to be part
+        /// of BaseHeight, so the pad blend flattened every trench inside or near an objective (Modlin's lost ~98 % of their depth).
+        static float TrenchCut(float x, float z)
+        {
+            if (M.trenches == null || M.trenches.Length == 0) return 0; float dm = TrenchD(x, z); if (dm >= 4) return 0;
+            return -1.8f * (1 - FU.Sm(.9f, 1.9f, dm)) + .5f * FU.Sm(1.9f, 2.6f, dm) * (1 - FU.Sm(2.6f, 3.8f, dm));
+        }
+        public static Vector2 KindSize(string k) { if (k == null || !KIND.TryGetValue(k, out var K)) K = KIND["house"]; return new Vector2(K.w, K.d); }
         static float SeaEdge(float x, float z) => Mathf.Min(M.seaHx - Mathf.Abs(x), M.seaHz - Mathf.Abs(z)) + (Fbm(x * .03f + 4, z * .03f, 3) - .5f) * 14;
         public static int BridgeAt(float x, float z)
         {
@@ -280,7 +305,6 @@ namespace FallWeiss
                     else if (best < hw + bank) h = Mathf.Min(h, Mathf.Lerp(lv + .05f, h, (best - hw) / bank));
                 }
             }
-            if (M.trenches != null && M.trenches.Length > 0) { float dm = TrenchD(x, z); if (dm < 4) h += -1.8f * (1 - FU.Sm(.9f, 1.9f, dm)) + .5f * FU.Sm(1.9f, 2.6f, dm) * (1 - FU.Sm(2.6f, 3.8f, dm)); }
             return h;
         }
         /// Map editor preview: a mission's terrain height without building the world (noise, hills, river, sea, rails,
@@ -288,13 +312,14 @@ namespace FallWeiss
         public static float PreviewHeight(Mission m, float x, float z)
         {
             var om = M; var os = NSEED; M = m; NSEED = m.seed;
-            try { return BaseHeight(x, z); } finally { M = om; NSEED = os; }
+            try { return BaseHeight(x, z) + TrenchCut(x, z); } finally { M = om; NSEED = os; }
         }
         public static float? WaterLevel(Mission m) => m.hasRiver ? m.rlevel : m.hasSea ? 0f : (float?)null;
         static float FullHeight(float x, float z)
         {
             float h = BaseHeight(x, z);
             for (int i = 0; i < zones.Count; i++) { var q = zones[i]; float d = FU.Hyp(x - q.x, z - q.y); if (d < q.z + q.w) h = Mathf.Lerp(h, zoneH[i], 1 - FU.Sm(q.z, q.z + q.w, d)); }
+            h += TrenchCut(x, z);
             if (M.hasRiver && BridgeAt(x, z) > 0) h = Mathf.Max(h, M.rlevel + 1.05f);
             return h;
         }
@@ -399,6 +424,29 @@ namespace FallWeiss
         }
         static bool NearRoad(float x, float z, float m) { foreach (var r in M.roads) if (FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2) < r.w / 2 + m) return true; return false; }
         public static bool NearRoadG(float x, float z, float m) => NearRoad(x, z, m);   // game-side access (AI deployment: AT guns cover roads)
+        public static bool InRiverG(float x, float z, float m) => M.hasRiver && InRiver(x, z, m);
+        public static bool NearRailG(float x, float z, float m) => M.rails != null && NearRail(x, z, m);
+        public static float SeaEdgeG(float x, float z) => M.hasSea ? SeaEdge(x, z) : 1e9f;
+        public static int dugCount;
+        /// Entrenching tool (T32): cuts a short trench (a foxhole is a 2–3 m one) into the live terrain with the same profile the
+        /// map's own trenches have (1.8 m deep, spoil thrown up on both lips), adds it to the mission's trench list so cover,
+        /// blast shelter, trees and craters all treat it as a trench, and rebuilds cover. Refuses where a trench already is.
+        public static bool DigTrench(float ax, float az, float bx, float bz)
+        {
+            if (terrainMesh == null || HG == null || dugCount > 60) return false;
+            float mx = (ax + bx) / 2, mz = (az + bz) / 2;
+            if (TrenchD(mx, mz) < 4.5f || InBuilding(mx, mz, 1.5f) || InWater(mx, mz) || NearRoad(mx, mz, 1) || BridgeAt(mx, mz) > 0) return false;
+            int x0 = Mathf.Max(0, Mathf.FloorToInt((Mathf.Min(ax, bx) - 4 - HO) / GS)), x1 = Mathf.Min(HN - 1, Mathf.CeilToInt((Mathf.Max(ax, bx) + 4 - HO) / GS));
+            int z0 = Mathf.Max(0, Mathf.FloorToInt((Mathf.Min(az, bz) - 4 - HO) / GS)), z1 = Mathf.Min(HN - 1, Mathf.CeilToInt((Mathf.Max(az, bz) + 4 - HO) / GS));
+            for (int iz = z0; iz <= z1; iz++) for (int ix = x0; ix <= x1; ix++)
+                {
+                    float px = HO + ix * GS, pz = HO + iz * GS, dm = FU.SegD(px, pz, ax, az, bx, bz); if (dm >= 4) continue; int i = iz * HN + ix;
+                    HG[i] += -1.6f * (1 - FU.Sm(.9f, 1.9f, dm)) + .45f * FU.Sm(1.9f, 2.6f, dm) * (1 - FU.Sm(2.6f, 3.8f, dm)); tVerts[i].y = HG[i];
+                    if (dm < 3.2f) { float k = .85f * (1 - FU.Sm(1.6f, 3.2f, dm)); tCols[i] = Color.Lerp(tCols[i], FU.Hex(0x4a3a28).linear, k); }   // the terrain colours are linear
+                }
+            var l = new List<FTrench>(M.trenches ?? new FTrench[0]) { new FTrench { pts = new[] { ax, az, bx, bz } } }; M.trenches = l.ToArray();
+            dugCount++; terrainDirty = true; colDirty = true; normT = 0; coverDirty = true; return true;
+        }
         public static bool InBuilding(float x, float z, float m) { foreach (var b in obst) if (!b.dead && !b.low && !b.soft && x > b.x0 - m && x < b.x1 + m && z > b.z0 - m && z < b.z1 + m) return true; foreach (var bd in Interiors.bds) if (bd.alive && x > bd.x0 - m && x < bd.x1 + m && z > bd.z0 - m && z < bd.z1 + m) return true; return false; }
         static bool InRiver(float x, float z, float m)
         {
@@ -452,6 +500,7 @@ namespace FallWeiss
         public static void Build(Mission m)
         {
             Clear(); M = m; NSEED = m.seed; WL = m.hasRiver ? m.rlevel : m.hasSea ? 0f : (float?)null;
+            FieldWorks.Plan(m);   // T32: Polish rifle pits and fire trenches at defended objectives (this build only; missions.json is untouched)
             root = new GameObject("World — " + m.name).transform;
             var R = new Rng(m.seed); float Hh = m.half;
             int defend = 1 - m.attacker;
@@ -863,6 +912,12 @@ namespace FallWeiss
         {
             int att = M.attacker, def = 1 - att; var aSp = M.spawn[att]; var dSp = M.spawn[def];
             bool Bad(float x, float z, float m) => InRiver(x, z, 3) || InBuilding(x, z, m) || TrenchD(x, z) < 3 || InWater(x, z);
+            for (int i = 0; i < FieldWorks.fireSegs.Count; i++)
+            {   // T32: a sandbag parapet on the forward lip of every Polish fire-trench section (the spoil is thrown forward and faced with bags)
+                var s = FieldWorks.fireSegs[i]; var f = FieldWorks.fireFace[i]; float mx = (s.x + s.z) / 2 + f.x * 2.5f, mz = (s.y + s.w) / 2 + f.y * 2.5f, rr = Mathf.Atan2(f.x, f.y);
+                if (InBuilding(mx, mz, 1.5f) || InWater(mx, mz) || NearRoad(mx, mz, 1)) continue;
+                var sv = Place("sandbags", mx, mz, rr); ModelObst(sv, rr, 120);
+            }
             foreach (var p in points)
             {
                 float dx = aSp.x - p.x, dz = aSp.z - p.z, l = Mathf.Max(.01f, FU.Hyp(dx, dz)), ux = dx / l, uz = dz / l, rot = Mathf.Atan2(ux, uz), px = -uz, pz = ux;
@@ -870,6 +925,17 @@ namespace FallWeiss
                 {
                     float x = p.x + ux * 13 + px * j * 9.5f, z = p.z + uz * 13 + pz * j * 9.5f; if (Bad(x, z, 2)) continue;
                     var sv = Place("sandbags", x, z, rot); ModelObst(sv, rot, 120);
+                }
+                {   // T32: cover inside the zone too — sandbagged positions either side of the centre facing the approach, and one
+                    // facing a flank, so the defenders have somewhere to fight from once the line in front has gone (and the attackers
+                    // something to clear). In towns this is the sandbagged street corner / courtyard of 1939, not a trench.
+                    float pr = Mathf.Max(8, p.r);
+                    foreach (var (fx, fz, ang) in new[] { (-.45f, .15f, 0f), (.45f, .15f, 0f), (FU.Rand(-.2f, .2f), -.35f, 1.5708f) })
+                    {
+                        float x = p.x + px * fx * pr + ux * fz * pr, z = p.z + pz * fx * pr + uz * fz * pr, rr = rot + ang * (R.Next() < .5f ? 1 : -1);
+                        if (Bad(x, z, 2.5f) || NearRoad(x, z, 1.5f) || Mathf.Abs(x) > M.half - 10 || Mathf.Abs(z) > M.half - 10) continue;
+                        var sv = Place("sandbags", x, z, rr); ModelObst(sv, rr, 120);
+                    }
                 }
                 for (int j = -2; j <= 2; j++)
                 {

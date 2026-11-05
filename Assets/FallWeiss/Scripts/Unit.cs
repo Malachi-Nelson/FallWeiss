@@ -62,6 +62,7 @@ namespace FallWeiss
         public bool immobile, gunDead;   // vehicle damage states (penetrations): tracks / engine gone, main gun out of action
         // crews (T27): a vehicle's men, and for a crewman the vehicle he is in and his seat. buttoned: commander down inside (hatch shut).
         public List<Unit> crew; public Unit mount; public int seat = -1; public bool crewShown = true, buttoned; public Unit playerCrew;
+        public float digT, digSnd;   // entrenching tool (T32): seconds into the current dig, last spade sound
         public float repairT, repairDur, repairTick; public string repairWhat; public AudioSource fireSrc; float smokeT;   // repairs (T28), fire bed when nearly dead (T29)
         public int tracerN; public float stanceT; public Vector2 vel; float vx0 = float.NaN, vz0;   // tracer cadence; stance-change timer (no firing / sprinting while it runs); ground speed for leading shots
         /// RO2: standing up or going down takes time. stand<->crouch .35 s, crouch<->prone .8 s, stand<->prone 1.1 s.
@@ -492,6 +493,7 @@ namespace FallWeiss
                 if (focus == null) Acquire(g); else los = FU.Hyp(x - focus.x, z - focus.z) <= def.range && World.LOS(Eye, focus.Chest); Decide(g);
                 if (target == null && Foot) Crew.TryRecrew(g, this);
             }
+            if (Foot && FieldWorks.AiTick(g, this, dt)) { spr = sprinting = false; return; }   // T32: digging in (crouched, spade going, no firing)
             var tgt = focus ?? target; if (tgt != null && !tgt.alive) tgt = target = null;
             float d = tgt != null ? FU.Hyp(x - tgt.x, z - tgt.z) : 1e9f; bool engaged = tgt != null && d <= def.range && los; var o = order; bool forced = o != null && o.force;
             Vector2? dest = null; float tol = .5f, spm = 1; bool rush = false; bool destIsOrder = false;
@@ -606,9 +608,13 @@ namespace FallWeiss
             foreach (var f in g.units)
             {
                 if (!f.alive || f == u || f.team != u.team) continue; if (Mathf.Abs(f.x - u.x) > 260 || Mathf.Abs(f.z - u.z) > 260) continue;
-                var fp = f.Chest; float tt = Vector3.Dot(fp - s, se) / L2; if (tt < .04f || tt > maxT) continue;
-                float rr = tt <= 1.05f ? r : r + (tt - 1) * L * .035f;   // past the target the lane widens with the round's own spread (~2°)
-                if ((s + se * tt - fp).sqrMagnitude < rr * rr) { u.cd = Mathf.Max(u.cd, .35f); return true; }
+                float rr0 = r; foreach (var fp in new[] { f.Chest, f.Eye })
+                {   // chest and head: a man crouched in a trench in front has only his head above the lip, and the lane test missed him
+                    float tt = Vector3.Dot(fp - s, se) / L2; if (tt * L < -.4f || tt > maxT) continue;   // was tt < .04: 4 % of an 80 m lane is 3 m, so the man at your shoulder was never checked (telemetry: every friendly kill was a victim 1–3 m from the shooter)
+                    tt = Mathf.Max(tt, 0);
+                    float rr = tt <= 1.05f ? rr0 : rr0 + (tt - 1) * L * .035f;   // past the target the lane widens with the round's own spread (~2°)
+                    if ((s + se * tt - fp).sqrMagnitude < rr * rr) { u.cd = Mathf.Max(u.cd, .35f); return true; }
+                }
             }
             return false;
         }
@@ -802,7 +808,13 @@ namespace FallWeiss
             bool cook = (t.def.kind == "tank" && t.turret && (forceCookOff || Random.value < .4f)); if (t.def.kind == "tank") forceCookOff = false;
             var survivors = new List<Unit>(); if (t.crew != null) foreach (var c in t.crew) if (c.alive && c.mount == t) survivors.Add(c);
             g.killLog[t.team, by == null ? 2 : by.team == t.team ? 1 : 0, by == null ? 3 : by.def.kind == "tank" ? 1 : by.def.kind == "gun" ? 2 : by.type == "mg" ? 3 : 0]++;   // balance telemetry: [victim team, enemy/friendly/none, rifle/tank/gun/mg]
-            if (by != null && by.team == t.team && by != t) { string fk = (lastSplash ? "blast:" : "shot:") + by.type + (by == g.player ? "(you)" : ""); g.ffLog[fk] = g.ffLog.TryGetValue(fk, out var fn) ? fn + 1 : 1; }
+            if (by != null && by.team == t.team && by != t)
+            {
+                string fk = (lastSplash ? "blast:" : "shot:") + by.type + (by == g.player ? "(you)" : ""); g.ffLog[fk] = g.ffLog.TryGetValue(fk, out var fn) ? fn + 1 : 1;
+                var tg = by.target ?? by.focus; float dv = FU.Hyp(by.x - t.x, by.z - t.z), dt2 = tg != null ? FU.Hyp(by.x - tg.x, by.z - tg.z) : -1;
+                float ang = tg != null ? Mathf.Abs(FU.AngDiff(Mathf.Atan2(tg.x - by.x, tg.z - by.z), Mathf.Atan2(t.x - by.x, t.z - by.z))) * Mathf.Rad2Deg : -1;
+                g.ffEvents.Add($"{(lastSplash ? "blast" : "shot")} {by.type}->{t.type} victim@{dv:0}m target@{dt2:0}m off-axis {ang:0}° shooterMoving={(by.moving ? 1 : 0)} victimStance={t.stance} dy={t.y - by.y:0.0}"); if (g.ffEvents.Count > 12) g.ffEvents.RemoveAt(0);
+            }
             if (by != null && by.team != t.team) { int pts = 10; var ap = g.ActivePoint(); if (ap != null && by.team != g.M.attacker && FU.Hyp(by.x - ap.x, by.z - ap.z) < ap.r + 25) pts = 15; by.score += pts; }   // defending the active objective counts extra
             foreach (var c in t.go.GetComponentsInChildren<Collider>()) c.enabled = false;
             if (t.team == g.ME) g.losses++; else { g.kills++; g.cp += t.def.kind == "tank" ? 15 : 3; }

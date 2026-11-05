@@ -206,13 +206,16 @@ namespace FallWeiss
             if (b.pk == "wall" || b.pk == "sill" || b.pk == "lintel" || b.pk == "pillar") bd.deadWalls++; g.audio.Shot("boom", c, .6f); g.audio.Shot("debris", c, .8f);
             if (b.pk == "sill" || b.pk == "lintel") g.audio.Shot("glass", c, .9f);   // window frames: the panes go with them
             if (b.pk == "roof") bd.roofGone = true; Render(bd);
+            Destruction.OnPieceBroken(g, b);   // T33: what stood on it falls, the walls beside it crack, the roof comes in past 35 %
             if (bd.deadWalls > bd.wallCount * .55f && bd.alive) Collapse(g, bd);
         }
         public static void Collapse(Game g, Bd bd)
         {
+            if (!bd.alive) return; bool burning = Destruction.Burning(bd);
             bd.alive = false; foreach (var b in bd.pieces) { if (b.dead) continue; b.dead = true; if (b.col) Object.Destroy(b.col); }
             surfs.RemoveAll(s => s.bd == bd); if (bd.go) Object.Destroy(bd.go); bd.go = null;
             Structures.Rubble(g, bd.x0, bd.x1, bd.z0, bd.z1, bd.baseY, bd.H, true);
+            Destruction.OnCollapse(g, bd, burning);   // T33: debris, standing corners, beams, dust, burning ruins
             foreach (var u in g.units.ToArray()) if (u.alive && u.x > bd.x0 && u.x < bd.x1 && u.z > bd.z0 && u.z < bd.z1) Combat.Damage(g, u, 55, true, false, null, true);
         }
 
@@ -310,11 +313,12 @@ namespace FallWeiss
     {
         public static void Damage(Game g, Vector3 p, float r, float dmg)
         {
-            var list = World.obst;
+            var list = World.obst; Bd lit = null;
             for (int i = list.Count - 1; i >= 0; i--)
             {
                 var b = list[i]; if (b.dead || b.hp <= 0 || b.soft) continue; float cx = Mathf.Clamp(p.x, b.x0, b.x1), cz = Mathf.Clamp(p.z, b.z0, b.z1), d = FU.Hyp(p.x - cx, p.z - cz);
                 if (d > r + 1 || p.y > b.y1 + 8) continue;
+                if (b.bd != null && b.bd != lit && d < r) { lit = b.bd; Destruction.BlastAt(g, b.bd, r); }   // T33: HE against a house can set it alight (one roll per house per burst)
                 b.hp -= dmg * (1 - d / (r + 2)); g.fx.Puff(new Vector3(cx, Mathf.Min(Mathf.Max(p.y, b.y0 + 1), b.y1), cz), new Color(.72f, .67f, .56f, .7f), 1, 3.2f, 1.3f, Vector3.up * 1.5f);
                 if (!b.smoking && b.hp < b.maxhp * .5f && !b.low && !b.rel) { b.smoking = true; g.AddBurning(b); }
                 if (b.hp <= 0) Collapse(g, b);
@@ -329,6 +333,7 @@ namespace FallWeiss
             float cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
             if (b.low) { for (int k = 0; k < 4; k++) g.fx.Puff(new Vector3(cx + FU.Rand(-2, 2), b.y0 + .6f, cz), new Color(.54f, .48f, .33f, .8f), .5f, 1.4f, 1, new Vector3(FU.Rand(-2, 2), 2, 0)); return; }
             Rubble(g, b.x0, b.x1, b.z0, b.z1, b.y0, b.h, b.kind != "ruin");
+            Destruction.OnCollapseSimple(g, b);
             foreach (var u in g.units.ToArray()) if (u.alive && FU.Hyp(u.x - cx, u.z - cz) < 5 && u.def.kind == "inf") Combat.Damage(g, u, 40, true, false, null, true);
         }
         public static void Rubble(Game g, float x0, float x1, float z0, float z1, float y0, float h, bool announce)
@@ -386,7 +391,7 @@ namespace FallWeiss
                     if (!grid.TryGetValue(Key(cx + i, cz + j), out var a)) continue;
                     foreach (var p in a)
                     {
-                        if (p.b != null && p.b.dead) continue; float d = FU.Hyp(p.x - ux, p.z - uz); if (d > 22) continue;
+                        if (p.b != null && (p.b.dead || (p.b.bd != null && Destruction.Burning(p.b.bd)))) continue; float d = FU.Hyp(p.x - ux, p.z - uz); if (d > 22) continue;   // a burning house is not cover
                         if (p.n.HasValue) { float ex = fx - p.x, ez = fz - p.z, l = Mathf.Max(.01f, FU.Hyp(ex, ez)); if ((p.n.Value.x * ex + p.n.Value.y * ez) / l > -.25f) continue; }
                         if (p.by != null && p.by != u && p.by.alive && t - p.taken < 14) continue;
                         if (World.InBuildingG(p.x, p.z, .3f) || World.InWater(p.x, p.z)) continue;

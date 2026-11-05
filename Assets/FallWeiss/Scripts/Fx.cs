@@ -188,7 +188,8 @@ namespace FallWeiss
             "voice_g_contact", "voice_g_reload", "voice_g_grenade", "voice_g_pinned", "voice_g_mandown", "voice_g_moveup", "voice_g_hold", "voice_g_charge",
             "voice_p_contact", "voice_p_reload", "voice_p_grenade", "voice_p_pinned", "voice_p_mandown", "voice_p_moveup", "voice_p_hold", "voice_p_charge",
             // inside the hull (roadmap T29): what a tank crew hears. Synthesised stand-ins play until recordings are cut (see Init)
-            "armor_pen", "armor_ricochet", "engine_damaged", "fire_loop", "repair_hammer", "repair_done" };
+            "armor_pen", "armor_ricochet", "engine_damaged", "fire_loop", "repair_hammer", "repair_done",
+            "dig" };   // T32: the spade biting into earth
         static readonly Dictionary<string, string> FALLBACK = new Dictionary<string, string>
         { ["k98"] = "rifle", ["p38"] = "pistol", ["pistol"] = "rifle", ["mp40"] = "smg", ["smg"] = "mg", ["mg42"] = "mg", ["browning"] = "mg", ["bar"] = "browning" };
         /// Playback level per key for recorded clips. Gunshots are peak-normalised with the transient left intact (no limiting), so this
@@ -214,7 +215,7 @@ namespace FallWeiss
             GUNS.Contains(k) || k == "cannon" ? (own ? Bus.Own : k == "cannon" ? Bus.Explo : Bus.World)
             : k == "boom" || k == "rumble" || k == "debris" || k == "glass" || k == "armor_pen" || k == "armor_ricochet" || k == "fire_loop" ? Bus.Explo
             : k == "repair_hammer" || k == "repair_done" || k == "engine_damaged" ? Bus.World
-            : k == "step" || k == "crack" || k == "pain" || k == "snort" || k == "melee" || k.StartsWith("reload") ? Bus.Foley
+            : k == "step" || k == "crack" || k == "pain" || k == "snort" || k == "melee" || k == "dig" || k.StartsWith("reload") ? Bus.Foley
             : k == "pickup" || k == "radio" ? Bus.Ui : Bus.Amb;
         Bus[] vBus = new Bus[0]; float[] vBase = new float[0]; readonly List<float> loopBase = new List<float>();
         float duckWorldT, duckAllT;
@@ -272,6 +273,7 @@ namespace FallWeiss
             clips["repair_done"] = Make("repair_done", .5f, 1500, 9, .6f);
             clips["fire_loop"] = Make("fire_loop", 2.5f, 900, .3f, .6f);
             clips["engine_damaged"] = Make("engine_damaged", 1.2f, 140, .6f, .7f);
+            clips["dig"] = Make("dig", .32f, 650, 10, .55f);   // a dull crunch of earth; stand-in until a recording is cut
             var root = new GameObject("Audio").transform;
             var flatCurve = AnimationCurve.Constant(0, 1, 1);
             for (int i = 0; i < 64; i++)   // recorded shots ring for ~1 s and distant ones are scheduled late, so automatic fire needs plenty of voices
