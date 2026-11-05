@@ -199,14 +199,14 @@ namespace FallWeiss
         void BuildGrass()
         {
             grass.Clear(); if (M.city) return;
-            var rnd = new System.Random(M.seed); float H = M.half + 10; var list = new List<Matrix4x4>(); int target = 30000;
+            var rnd = new System.Random(M.seed); float H = M.half + 10; var list = new List<Matrix4x4>(); int target = Mathf.RoundToInt(30000 * Mathf.Clamp(World.AreaK, 1, 6));   // 30 000 was fixed whatever the map size: one tuft per 30 m² on the 960 m maps. Scales with area now (cells are culled by distance, so the draw cost does not)
             for (int i = 0; i < target * 2 && list.Count < target; i++)
             {
                 float x = ((float)rnd.NextDouble() - .5f) * 2 * H, z = ((float)rnd.NextDouble() - .5f) * 2 * H;
                 if (World.InBuilding(x, z, 1) || World.InWater(x, z) || World.Slope(x, z) > .5f || World.TrenchD(x, z) < 3 || (M.hasSea && World.H(x, z) < 3)) continue;
                 bool road = false; foreach (var r in M.roads) if (FU.SegD(x, z, r.x1, r.z1, r.x2, r.z2) < r.w / 2 + 1) { road = true; break; }
                 if (road) continue;
-                float s = .6f + (float)rnd.NextDouble() * .6f;
+                float meadow = Mathf.PerlinNoise(x * .02f + M.seed, z * .02f); float s = (.6f + (float)rnd.NextDouble() * .6f) * (meadow > .6f ? 1.35f : 1);   // patches of taller growth where the meadow noise peaks
                 list.Add(Matrix4x4.TRS(new Vector3(x, World.H(x, z) - .03f, z), Quaternion.Euler(0, (float)rnd.NextDouble() * 360, 0), new Vector3(s, s * (.8f + (float)rnd.NextDouble() * .6f), s)));
             }
             // bucket by 80 m cell so Update can cull by distance
