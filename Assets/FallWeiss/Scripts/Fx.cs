@@ -186,7 +186,9 @@ namespace FallWeiss
             "mg42_tail", "mg42_far_tail", "browning_tail", "browning_far_tail", "mp40_tail", "mp40_far_tail", "bar_tail", "bar_far_tail",
             // voice barks (roadmap A2): drop recordings into Resources/Audio/voice_<g|p>_<event>/ and they play; nothing plays until they exist
             "voice_g_contact", "voice_g_reload", "voice_g_grenade", "voice_g_pinned", "voice_g_mandown", "voice_g_moveup", "voice_g_hold", "voice_g_charge",
-            "voice_p_contact", "voice_p_reload", "voice_p_grenade", "voice_p_pinned", "voice_p_mandown", "voice_p_moveup", "voice_p_hold", "voice_p_charge" };
+            "voice_p_contact", "voice_p_reload", "voice_p_grenade", "voice_p_pinned", "voice_p_mandown", "voice_p_moveup", "voice_p_hold", "voice_p_charge",
+            // inside the hull (roadmap T29): what a tank crew hears. Synthesised stand-ins play until recordings are cut (see Init)
+            "armor_pen", "armor_ricochet", "engine_damaged", "fire_loop", "repair_hammer", "repair_done" };
         static readonly Dictionary<string, string> FALLBACK = new Dictionary<string, string>
         { ["k98"] = "rifle", ["p38"] = "pistol", ["pistol"] = "rifle", ["mp40"] = "smg", ["smg"] = "mg", ["mg42"] = "mg", ["browning"] = "mg", ["bar"] = "browning" };
         /// Playback level per key for recorded clips. Gunshots are peak-normalised with the transient left intact (no limiting), so this
@@ -197,7 +199,8 @@ namespace FallWeiss
           ["k98_far"] = 1f, ["mg42_far"] = 1f, ["browning_far"] = 1f, ["bar_far"] = 1f, ["mp40_far"] = .9f, ["pistol_far"] = .85f, ["cannon_far"] = 1f, ["crack"] = 1f, ["boom"] = 1f, ["cannon"] = 1f, ["rumble"] = 1f,   // (boom / cannon / rumble had no entry and fell to .8; a crack at .6 was a whisper)
           ["mg42_tail"] = 1f, ["browning_tail"] = 1f, ["bar_tail"] = 1f, ["mp40_tail"] = 1f, ["mg42_far_tail"] = 1f, ["browning_far_tail"] = 1f, ["bar_far_tail"] = 1f, ["mp40_far_tail"] = 1f,
           ["reload_bolt"] = .45f, ["reload_mag"] = .45f, ["reload_mg"] = .45f, ["pickup"] = .5f, ["drone"] = .9f,
-          ["step"] = .24f, ["radio"] = .3f, ["pain"] = .7f, ["glass"] = .65f, ["debris"] = .75f, ["snort"] = .55f };
+          ["step"] = .24f, ["radio"] = .3f, ["pain"] = .7f, ["glass"] = .65f, ["debris"] = .75f, ["snort"] = .55f,
+          ["armor_pen"] = 1f, ["armor_ricochet"] = .8f, ["engine_damaged"] = .8f, ["fire_loop"] = .7f, ["repair_hammer"] = .6f, ["repair_done"] = .6f };
         static readonly HashSet<string> FLAT = new HashSet<string> { "pickup", "reload_bolt", "reload_mag", "reload_mg", "radio" };   // played at the listener, no 3D (the player's own steps come through own=true; NPC steps are 3D)
 
         // ---- buses & ducking (A5) ----
@@ -209,7 +212,8 @@ namespace FallWeiss
         static float BusVol(Bus b) => b == Bus.Own ? OwnVol : b == Bus.World ? WorldVol : b == Bus.Explo ? ExploVol : b == Bus.Foley ? FoleyVol : b == Bus.Amb ? AmbVol : UiVol;
         static Bus BusOf(string k, bool own) =>
             GUNS.Contains(k) || k == "cannon" ? (own ? Bus.Own : k == "cannon" ? Bus.Explo : Bus.World)
-            : k == "boom" || k == "rumble" || k == "debris" || k == "glass" ? Bus.Explo
+            : k == "boom" || k == "rumble" || k == "debris" || k == "glass" || k == "armor_pen" || k == "armor_ricochet" || k == "fire_loop" ? Bus.Explo
+            : k == "repair_hammer" || k == "repair_done" || k == "engine_damaged" ? Bus.World
             : k == "step" || k == "crack" || k == "pain" || k == "snort" || k == "melee" || k.StartsWith("reload") ? Bus.Foley
             : k == "pickup" || k == "radio" ? Bus.Ui : Bus.Amb;
         Bus[] vBus = new Bus[0]; float[] vBase = new float[0]; readonly List<float> loopBase = new List<float>();
@@ -260,6 +264,14 @@ namespace FallWeiss
             clips["rumble"] = Make("rumble", 3.2f, 70, 1.1f, 1f);   // distant artillery: all low end, long tail
             clips["drone"] = Drone();
             clips["melee"] = Make("melee", .22f, 2400, 16, .45f);   // blade / butt swing: a short airy swish, never a gunshot
+            // T29 stand-ins until the Sonniss cuts land: a penetration is a hard low clang with a long ring, a ricochet a short bright ping,
+            // the sledge on a track link a dry clank, "done" a softer double clank, the fire bed a dull broadband roar
+            clips["armor_pen"] = Make("armor_pen", 1.4f, 520, 2.6f, 1f);
+            clips["armor_ricochet"] = Make("armor_ricochet", .4f, 3600, 11, .7f);
+            clips["repair_hammer"] = Make("repair_hammer", .16f, 2200, 28, .8f);
+            clips["repair_done"] = Make("repair_done", .5f, 1500, 9, .6f);
+            clips["fire_loop"] = Make("fire_loop", 2.5f, 900, .3f, .6f);
+            clips["engine_damaged"] = Make("engine_damaged", 1.2f, 140, .6f, .7f);
             var root = new GameObject("Audio").transform;
             var flatCurve = AnimationCurve.Constant(0, 1, 1);
             for (int i = 0; i < 64; i++)   // recorded shots ring for ~1 s and distant ones are scheduled late, so automatic fire needs plenty of voices
@@ -369,7 +381,7 @@ namespace FallWeiss
         // the highs; and sound arrives at 343 m/s, so distant fire is heard after the flash. Your own weapon is dry, 2D and full level.
         static readonly HashSet<string> GUNS = new HashSet<string> { "rifle", "k98", "pistol", "p38", "smg", "mp40", "mg", "mg42", "browning", "bar" };
         const float FAR_AT = 60, SPEED = 343;
-        static float Ref(string k) => GUNS.Contains(k) ? 10 : k.StartsWith("voice") ? 7 : k == "boom" || k == "cannon" ? 25 : k == "rumble" ? 80 : k == "drone" ? 60 : k == "siren" ? 30 : k == "crack" ? 4f : k == "step" ? 6 : 4;   // reference distances (full level inside): a rifle at 40 m is -12 dB, not -16; a shell at 60 m -7.6, not -12
+        static float Ref(string k) => GUNS.Contains(k) ? 10 : k.StartsWith("voice") ? 7 : k == "boom" || k == "cannon" ? 25 : k == "rumble" ? 80 : k == "armor_pen" ? 14 : k == "repair_hammer" || k == "repair_done" ? 8 : k == "drone" ? 60 : k == "siren" ? 30 : k == "crack" ? 4f : k == "step" ? 6 : 4;   // reference distances (full level inside): a rifle at 40 m is -12 dB, not -16; a shell at 60 m -7.6, not -12
         bool FarOf(string k, out string far)
         {
             for (string key = k; key != null; key = FALLBACK.TryGetValue(key, out var f) ? f : null)

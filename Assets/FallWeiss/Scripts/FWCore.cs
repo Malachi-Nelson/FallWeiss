@@ -98,6 +98,9 @@ namespace FallWeiss
             ["tank"] = new UnitDef { kind = "tank", hp = 420, speed = 7f, range = 140, sight = 150, dmg = 70, rof = 2.6f, acc = .85f, r = 1.8f, armor = true, my = 2f, ty = 1.1f, pen = true, splash = 4.5f, fireOnMove = true, mgdmg = 100, bh = 3.4f },   // tanks are the kings of the 1939 battlefield: grenades do nothing to them, only guns and shells kill them. HE splash was 6.5 m: telemetry had four Pz IIs killing 44 of 60 Polish dead in 2.5 min, so it is back to realistic 2 cm / 37 mm bursts (3 / 4.5 m)
             ["sniper"] = new UnitDef { kind = "inf", hp = 100, speed = 3.4f, range = 190, sight = 210, dmg = 100, rof = 4.6f, acc = .85f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
             ["cav"] = new UnitDef { kind = "cav", hp = 100, speed = 10, range = 55, sight = 100, dmg = 50, rof = 3.2f, acc = .5f, r = .9f, my = 2.2f, ty = 1.3f, bh = 3.6f },
+            // crews (T27): gun numbers carry the carbine, tank crews a pistol only — on foot they are the weakest men on the field
+            ["crew"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 70, sight = 110, dmg = 55, rof = 3.3f, acc = .4f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
+            ["tcrew"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 35, sight = 100, dmg = 42, rof = 1.1f, acc = .32f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
         };
 
         static readonly Dictionary<string, UnitDef> cache = new Dictionary<string, UnitDef>();
@@ -115,8 +118,8 @@ namespace FallWeiss
 
         public static readonly Dictionary<string, string>[] NAMES =
         {
-            new Dictionary<string, string> { ["rifle"] = "Schütze", ["mg"] = "MG 34 Team", ["at"] = "3.7 cm PaK 36", ["tank"] = "Panzer II", ["sniper"] = "Scharfschütze", ["cav"] = "Kavallerie" },
-            new Dictionary<string, string> { ["rifle"] = "Strzelec", ["mg"] = "CKM wz.30", ["at"] = "Bofors 37 mm", ["tank"] = "7TP Light Tank", ["cav"] = "Ułan Cavalry", ["sniper"] = "Strzelec wyborowy" },
+            new Dictionary<string, string> { ["rifle"] = "Schütze", ["mg"] = "MG 34 Team", ["at"] = "3.7 cm PaK 36", ["tank"] = "Panzer II", ["sniper"] = "Scharfschütze", ["cav"] = "Kavallerie", ["crew"] = "Kanonier", ["tcrew"] = "Panzerschütze" },
+            new Dictionary<string, string> { ["rifle"] = "Strzelec", ["mg"] = "CKM wz.30", ["at"] = "Bofors 37 mm", ["tank"] = "7TP Light Tank", ["cav"] = "Ułan Cavalry", ["sniper"] = "Strzelec wyborowy", ["crew"] = "Kanonier", ["tcrew"] = "Czołgista" },
         };
         public static readonly string[] SIDE = { "Wehrmacht", "Polish Army" };
 
@@ -152,6 +155,8 @@ namespace FallWeiss
                 case "mg": return team == 0 ? new[] { "mg34", "p08" } : new[] { "ckm30", "vis" };
                 case "sniper": return team == 0 ? new[] { "kar98kz", "p08", "bayonet" } : new[] { "wz29z", "vis", "bayonet" };
                 case "cav": return team == 0 ? new[] { "kar98k", "sabre", "p08" } : new[] { "wz29", "sabre", "vis" };   // 1939: each side its own carbine and pistol
+                case "crew": return team == 0 ? new[] { "kar98k", "p08" } : new[] { "wz29", "vis" };   // PaK / Bofors numbers: carbine slung, no bayonet drill
+                case "tcrew": return team == 0 ? new[] { "p08" } : new[] { "vis" };                   // Panzer II / 7TP crews: the pistol in the holster and nothing else
                 case "at": return new[] { "at_gun" };
                 case "tank": return new[] { "tank_gun" };
             }

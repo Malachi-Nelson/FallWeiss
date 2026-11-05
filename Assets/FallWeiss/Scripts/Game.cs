@@ -41,6 +41,7 @@ namespace FallWeiss
 
         // first person state (port of fp)
         float yaw, pitch, ads, fov = 70, recoil, bob, eye = 1.55f, swT, fireQueued, gT, lean; Vector3 tpPivot;
+        public float Ads => ads;
         float sens = 1, baseFov = 72;   // options (PlayerPrefs FW.Sens / FW.Fov)
         float fpsAvg = 60, fpsMin = 60, fpsMinT;
         public int[,,] killLog = new int[2, 3, 4];   // who killed whom (dbg losses)
@@ -547,7 +548,9 @@ namespace FallWeiss
             if (type == "rifle" && u.id % 8 == 0) u.officer = true;   // a squad leader in every few riflemen (MP 38 + Luger / wz.29 + Vis)
             u.y = World.H(x, z); u.hp = u.max = u.def.hp; u.home = new Vector2(x, z); u.cd = Random.value; u.think = Random.value * .3f; u.anim = Random.value * 6; u.prot = t + 3;
             if (u.def.kind == "inf" && type == "rifle") u.gren = u.officer ? 2 : (u.id % 3 == 0 ? 2 : 1);   // riflemen carry one or two
-            u.BuildModel(unitRoot); units.Add(u); return u;
+            u.BuildModel(unitRoot); units.Add(u);
+            if (u.def.kind == "tank" || u.def.kind == "gun") Crew.Spawn(this, u);   // T27: real soldiers on the seats, not figures baked into the hull
+            return u;
         }
 
         public Vector2 FreeSpot(float cx, float cz, float sp, float r)
@@ -1577,6 +1580,7 @@ namespace FallWeiss
             }
             // RO2 barrel change: an MG that overheats can't fire until the crew swaps the barrel (a few seconds, gun down)
             if (w != null && w.mg && kb.xKey.wasPressedThisFrame && u.barrelT <= 0 && u.heat > .2f) { u.barrelT = 4.5f; Msg("Changing barrel…"); }
+            if (kb.eKey.wasPressedThisFrame && !kb.leftShiftKey.isPressed && !kb.qKey.isPressed) { if (ToggleVehicle()) return; }   // E: climb out of / into a vehicle (T27); Q/E lean still works
             if (u.barrelT > 0) { u.barrelT -= dt; if (u.barrelT <= 0) { u.heat = 0; u.overheated = false; Msg("Fresh barrel in."); } }
             mgRest = w != null && w.mg && !u.moving && foot && (st == 2 || (ads > .5f && RestedOnCover()));
             // breath holding (Shift while aiming, standing still) — port of fp.hold / fp.gasp
@@ -1837,6 +1841,7 @@ namespace FallWeiss
             bool cannon = u.def.pen; if (cannon && u.gunDead) { u.cd = 1; Msg("Main gun is out of action — coaxial MG only."); return; }
             float spread = ShotSpread(w, u.heat, u.moving, ads, st, u.supp, hold, mgRest);
             if (w.clip > 0) u.clip--; u.cd = Mathf.Max(u.cd, -.05f) + (cannon ? u.def.rof : w.rof); u.lastShot = Time.time;
+            if (u.def.kind == "gun" && Crew.Alive(u) == 0) u.cd *= 1.8f;   // T27: no loader — you lay, load and fire the piece yourself
             var dir = (cam.transform.rotation * new Vector3(FU.Rand(-spread, spread), FU.Rand(-spread, spread), 1)).normalized; var o = cam.transform.position;
             float range = w.range > 0 ? w.range : cannon ? 1200 : 800;   // a rifle round carries well past anything on these maps; it used to stop dead at def.range*2.2 (165 m for a Mauser)
             var (dist, _, _) = CastRay(o, dir, range, u.team, u);   // where the sights point (only to aim the round; the round itself flies and drops)
@@ -2240,7 +2245,7 @@ namespace FallWeiss
                 else
                 {
                     var r = Rect.MinMaxRect(Mathf.Min(dragStart.x, mp.x), Mathf.Min(dragStart.y, mp.y), Mathf.Max(dragStart.x, mp.x), Mathf.Max(dragStart.y, mp.y));
-                    foreach (var u in units) { if (!u.alive || u.team != ME) continue; var sp = cam.WorldToScreenPoint(new Vector3(u.x, u.y + 1, u.z)); if (sp.z > 0 && r.Contains(sp)) Select(u); }
+                    foreach (var u in units) { if (!u.alive || u.team != ME || u.mount != null) continue; var sp = cam.WorldToScreenPoint(new Vector3(u.x, u.y + 1, u.z)); if (sp.z > 0 && r.Contains(sp)) Select(u); }
                 }
             }
             var enC = ms.rightButton.wasPressedThisFrame && selected.Count > 0 && !kb.leftShiftKey.isPressed && !kb.leftCtrlKey.isPressed ? EnemyAtScreen(mp) : null;
@@ -2261,7 +2266,7 @@ namespace FallWeiss
                 PingAt(tgt.x, tgt.z, kb.leftCtrlKey.isPressed ? UI.Gold : attackMove ? new Color(1, .4f, .3f) : new Color(.4f, 1, .4f));
             }
             if (kb.hKey.wasPressedThisFrame) foreach (var u in selected) { u.secure = -1; u.order = null; u.queue.Clear(); u.focus = null; u.follow = false; u.manual = true; u.hide = null; u.home = new Vector2(u.x, u.z); u.leash = 5; }
-            if (kb.aKey.wasPressedThisFrame && kb.leftCtrlKey.isPressed) { foreach (var u in units) if (u.alive && u.team == ME) Select(u); }
+            if (kb.aKey.wasPressedThisFrame && kb.leftCtrlKey.isPressed) { foreach (var u in units) if (u.alive && u.team == ME && u.mount == null) Select(u); }
             if (kb.cKey.wasPressedThisFrame) { if (selected.Count == 0) Msg("Select units first, then C and click an objective."); else { armSecure = true; Msg("Secure: click an objective."); } }
             if (kb.spaceKey.wasPressedThisFrame && selected.Count > 0) { float sx = 0, sz = 0; int n = 0; foreach (var u in selected) if (u.alive) { sx += u.x; sz += u.z; n++; } if (n > 0) { rtsPos.x = sx / n; rtsPos.z = sz / n; } }
             if (kb.fKey.wasPressedThisFrame || kb.pKey.wasPressedThisFrame) { PossessSomething(); return; }
@@ -2329,7 +2334,7 @@ namespace FallWeiss
         void PossessSomething()
         {
             var pick = selected.FirstOrDefault(u => u.alive && u.team == ME);
-            if (pick == null) { var c = rts ? rtsPos : (lastPlayer != null ? new Vector3(lastPlayer.x, 0, lastPlayer.z) : SpawnPos(ME)); pick = units.Where(u => u.alive && u.team == ME && u.def.kind != "gun").OrderBy(u => FU.Hyp(u.x - c.x, u.z - c.z)).FirstOrDefault(); }
+            if (pick == null) { var c = rts ? rtsPos : (lastPlayer != null ? new Vector3(lastPlayer.x, 0, lastPlayer.z) : SpawnPos(ME)); pick = units.Where(u => u.alive && u.team == ME && u.def.kind != "gun" && u.mount == null).OrderBy(u => FU.Hyp(u.x - c.x, u.z - c.z)).FirstOrDefault(); }
             if (pick == null) { Msg("No friendly units left to take control of."); return; }
             pick.manual = false; EnterFps(pick); if (tp) pick.SetRenderers(true); Msg("Now controlling: " + Defs.NAMES[pick.team][pick.type]);
         }
@@ -2337,7 +2342,7 @@ namespace FallWeiss
         Unit LookFriend(float maxD = 260)
         {
             if (player == null) return null; Unit pick = null; var o = cam.transform.position; var dir = cam.transform.forward; float best = maxD;
-            foreach (var e in units) { if (!e.alive || e.team != ME || e == player) continue; var to = e.Chest - o; float along = Vector3.Dot(to, dir); if (along < 0 || along > best) continue; float rr = e.Foot ? 1.4f : 3f; if ((to - dir * along).magnitude < rr) { best = along; pick = e; } }
+            foreach (var e in units) { if (!e.alive || e.team != ME || e == player || e.mount != null) continue; var to = e.Chest - o; float along = Vector3.Dot(to, dir); if (along < 0 || along > best) continue; float rr = e.Foot ? 1.4f : 3f; if ((to - dir * along).magnitude < rr) { best = along; pick = e; } }
             return pick;
         }
         /// Test hooks used by TestDriver ("dbg ..." lines).
@@ -2519,10 +2524,40 @@ namespace FallWeiss
         void SwapControl()
         {
             if (player == null) return; var pick = LookFriend();
-            if (pick == null) { float bd = 20; foreach (var e in units) { if (!e.alive || e.team != ME || e == player) continue; float d = FU.Hyp(e.x - player.x, e.z - player.z); if (d < bd) { bd = d; pick = e; } } }
+            if (pick == null) { float bd = 20; foreach (var e in units) { if (!e.alive || e.team != ME || e == player || e.mount != null) continue; float d = FU.Hyp(e.x - player.x, e.z - player.z); if (d < bd) { bd = d; pick = e; } } }
             if (pick == null) { Msg("Look at a friendly unit (or stand next to one) and press F to take control."); return; }
             var prev = player; prev.Save(); prev.stance = 0; if (prev.def.kind != "tank") prev.heading = yaw; prev.turretH = yaw; ReleasePlayer(); prev.manual = false; prev.SetRenderers(true); if (prev.Foot) { prev.squad = true; prev.follow = true; prev.slot = slotCounter++ % 16; }
             EnterFps(pick); if (tp) pick.SetRenderers(true); Msg("Now controlling: " + Defs.NAMES[pick.team][pick.type]);
+        }
+        /// E (T27): leave the vehicle you are in as one of its crew, or climb into the friendly tank / gun beside you.
+        bool ToggleVehicle()
+        {
+            var u = player; if (u == null || !u.alive) return false;
+            if (u.def.kind == "tank" || u.def.kind == "gun")
+            {
+                Unit c = u.playerCrew != null && u.playerCrew.alive && u.playerCrew.mount == u ? u.playerCrew : null;
+                if (c == null && u.crew != null) foreach (var k in u.crew) if (k.alive && k.mount == u) { c = k; break; }
+                if (c == null) { c = SpawnUnit(u.team, Crew.CrewType(u), u.x, u.z, u.heading); Crew.Mount(this, c, u); }   // the last man: you
+                u.Save(); u.stance = 0; ReleasePlayer(); u.manual = true; u.playerCrew = null; u.order = null;
+                Crew.Dismount(this, c, bail: false);
+                EnterFps(c); yaw = u.heading; Msg("Out of the " + Defs.NAMES[u.team][u.type] + " — E to climb back in.");
+                return true;
+            }
+            if (!u.Foot) return false;
+            Unit v = null; float bd = 4.5f;
+            foreach (var e in units) { if (!e.alive || e.team != ME || (e.def.kind != "tank" && e.def.kind != "gun")) continue; float d = FU.Hyp(e.x - u.x, e.z - u.z) - e.def.r; if (d < bd) { bd = d; v = e; } }
+            if (v == null) return false;
+            if (Crew.Alive(v) >= Crew.CrewSize(v)) { Unit spare = null; foreach (var k in v.crew) if (k.alive && k.mount == v && (spare == null || k.seat > spare.seat)) spare = k; if (spare != null) Crew.Dismount(this, spare, bail: false); }   // full: one of the men makes room
+            u.Save(); ReleasePlayer(); Crew.Mount(this, u, v); v.playerCrew = u;
+            if (v.weps == null) v.InitWeapons(Defs.Loadout(v.team, v.type));
+            EnterFps(v); if (tp) v.SetRenderers(true); Msg("In the " + Defs.NAMES[v.team][v.type] + " — E to get out.");
+            return true;
+        }
+        /// The vehicle you were in is lost but one of the crew lives: you are him now, outside, with a pistol.
+        public void PlayerBail(Unit v, Unit c)
+        {
+            ReleasePlayer(); if (vm) vm.gameObject.SetActive(false); if (tankVm) tankVm.gameObject.SetActive(false);
+            EnterFps(c); c.rout = 0; c.supp = .5f; c.mor = 40; yaw = c.heading; Msg("Bailed out! The " + Defs.NAMES[v.team][v.type] + " is gone — you have your sidearm.");
         }
         /// Tank coaxial machine gun (RMB while driving) — port of playerFire(u, true).
         void CoaxFire(Unit u)
@@ -2554,7 +2589,7 @@ namespace FallWeiss
             foreach (var r in M.roads) { float dz = Mathf.Abs(r.z2 - r.z1); if (dz > best) { best = dz; road = r; } }
             if (road == null) return; var a = new Vector2(road.x1, road.z1); var b = new Vector2(road.x2, road.z2);
             bool startA = FU.Hyp(a.x - sp.x, a.y - sp.z) < FU.Hyp(b.x - sp.x, b.y - sp.z); var A = startA ? a : b; var B = startA ? b : a; float L = (B - A).magnitude;
-            for (int i = 0; i < 3; i++) { var m = ModelLib.Spawn("truck_" + att, World.root).transform; m.gameObject.SetActive(false); convoy.Add(new Convoy { m = m, s = -i * 24 - FU.Rand(0, 40), A = A, dir = (B - A) / L, L = L }); }
+            for (int i = 0; i < 3; i++) { var m = ModelLib.Spawn("truck_" + att, World.root).transform; Crew.AddDriver(m, att); m.gameObject.SetActive(false); convoy.Add(new Convoy { m = m, s = -i * 24 - FU.Rand(0, 40), A = A, dir = (B - A) / L, L = L }); }
         }
         void UpdateConvoy(float dt)
         {
@@ -2855,6 +2890,17 @@ namespace FallWeiss
             {
                 UI.Shadow(new Rect(W - 520, H - 112, 496, 48), u.cd > 0 ? "LOADING" : "READY", UI.ammo, u.cd > 0 ? UI.Dim : UI.Text);
                 if (u.def.kind == "tank") UI.Shadow(new Rect(W - 520, H - 62, 496, 22), $"Range {PlayerZero(null, true)} m  (PgUp / PgDn)   LMB main gun   RMB coaxial MG", rs, zeroShowT > 0 ? UI.Gold : A(UI.Dim, .7f));
+                // crew and damage state (T27 / T28): the men left, what is broken, what is being repaired
+                int cAlive = Crew.Alive(u), cTot = Crew.CrewSize(u); string cs = $"Crew {cAlive}/{cTot}" + (u.def.kind == "gun" && cAlive == 0 ? "  — serving the gun alone (slow)" : "") + "   E leave";
+                UI.Shadow(new Rect(W - 520, H - 138, 496, 22), cs, rs, cAlive < cTot ? UI.Gold : A(UI.Dim, .7f));
+                if (u.def.kind == "tank" && (u.immobile || u.gunDead || u.hp < u.max * .3f))
+                {
+                    string dmg = (u.immobile ? "TRACKS / ENGINE OUT" : "") + (u.gunDead ? (u.immobile ? "  ·  " : "") + "MAIN GUN OUT" : "") + (u.hp < u.max * .3f ? "  ·  FIRE" : "");
+                    if (u.repairT > 0) dmg += $"     repairing {u.repairWhat} {Mathf.RoundToInt(u.repairT / u.repairDur * 100)}%" + (t - u.lastHit < 2 ? " (under fire)" : "");
+                    else if (cAlive < 2) dmg += "     no one spare to repair";
+                    bool blink = Mathf.Sin(Time.unscaledTime * 6) > 0 || u.repairT > 0;
+                    UI.Shadow(new Rect(W / 2 - 300, H - 200, 600, 24), dmg, UI.lineC, u.repairT > 0 ? A(UI.Gold, .9f) : blink ? A(UI.Red, .9f) : A(UI.Red, .5f));
+                }
             }
             else if (aW > 0 && w != null)
             {
@@ -3038,7 +3084,7 @@ namespace FallWeiss
         void DrawControls(Rect r)
         {
             string inf = "<b><color=#ffd96a>INFANTRY</color></b>\nWASD move · Shift sprint · C crouch · Z prone\nQ / E lean · LMB fire · RMB iron sights\nShift while aiming: hold breath\nR reload · K check ammo · 1–3 / wheel weapons\nPage Up / Page Down: sight range (zeroing)\nG grenade · Shift+G smoke grenade\nH bandage · T third person · L scoreboard\nMG: go prone or rest on cover to deploy,\n      X changes an overheated barrel";
-            string cmd = "<b><color=#ffd96a>COMMAND</color></b>\nV squad orders (7: secure objective) · N reinforcements\nB call support (aim at the target)\nF take control of the friendly you look at\n\n<b><color=#ffd96a>COMMAND MAP</color></b>  (Tab)\nLMB select / drag · RMB move\nAlt+RMB attack-move · Ctrl+RMB fast\nShift queue · H halt · Ctrl+A all\nC + click: secure an objective\n1–6 buy units · B support strike\nF / P take control\nminimap: LMB jump · RMB order";
+            string cmd = "<b><color=#ffd96a>COMMAND</color></b>\nV squad orders (7: secure objective) · N reinforcements\nB call support (aim at the target)\nF take control of the friendly you look at\nE climb into / out of a tank or gun (crews bail out when it is lost)\n\n<b><color=#ffd96a>COMMAND MAP</color></b>  (Tab)\nLMB select / drag · RMB move\nAlt+RMB attack-move · Ctrl+RMB fast\nShift queue · H halt · Ctrl+A all\nC + click: secure an objective\n1–6 buy units · B support strike\nF / P take control\nminimap: LMB jump · RMB order";
             string dep = "<b><color=#ffd96a>DEPLOYMENT</color></b>\n1–9 / Tab pick a card · LMB place · RMB face\nR rotate · X lead this section · Del lift\nV auto-place the rest · Enter begin";
             float cw = (r.width - 24) / 2; GUI.Label(new Rect(r.x, r.y + 8, cw, r.height - 16), inf + "\n\n" + dep, UI.small); GUI.Label(new Rect(r.x + cw + 24, r.y + 8, cw, r.height - 16), cmd, UI.small);
         }

@@ -60,6 +60,9 @@ namespace FallWeiss
         public float barkT; bool wasPinned;   // voice barks (Game.Bark)
         public float suppT = -99; public Vector2 suppFrom; public bool Pinned => supp > .75f;   // when fire last came in and from where; pinned = head down, no aimed fire
         public bool immobile, gunDead;   // vehicle damage states (penetrations): tracks / engine gone, main gun out of action
+        // crews (T27): a vehicle's men, and for a crewman the vehicle he is in and his seat. buttoned: commander down inside (hatch shut).
+        public List<Unit> crew; public Unit mount; public int seat = -1; public bool crewShown = true, buttoned; public Unit playerCrew;
+        public float repairT, repairDur, repairTick; public string repairWhat; public AudioSource fireSrc; float smokeT;   // repairs (T28), fire bed when nearly dead (T29)
         public int tracerN; public float stanceT; public Vector2 vel; float vx0 = float.NaN, vz0;   // tracer cadence; stance-change timer (no firing / sprinting while it runs); ground speed for leading shots
         /// RO2: standing up or going down takes time. stand<->crouch .35 s, crouch<->prone .8 s, stand<->prone 1.1 s.
         public void SetStance(int st) { if (st == stance) return; int a = Mathf.Min(st, stance), b = Mathf.Max(st, stance); stanceT = a == 0 && b == 1 ? .35f : a == 1 ? .8f : 1.1f; stance = st; }
@@ -72,7 +75,8 @@ namespace FallWeiss
         public string Variant()
         {
             string k = type == "mg" ? "mg" : type == "sniper" ? "sniper" : "rifle";
-            if (weps != null && weps.Length > 0) { var w = weps[0]; if (w == "mp38" || w == "bar28") k = "assault"; else if (w == "mg34" || w == "ckm30") k = "mg"; else if (w == "kar98kz" || w == "wz29z") k = "sniper"; }
+            if (weps != null && weps.Length > 0) { var w = weps[0]; if (w == "mp38" || w == "bar28") k = "assault"; else if (w == "mg34" || w == "ckm30") k = "mg"; else if (w == "kar98kz" || w == "wz29z") k = "sniper"; else if (w == "p08" || w == "p38" || w == "vis") k = "pistol"; }
+            else if (type == "tcrew") k = "pistol";
             return k;
         }
 
@@ -153,6 +157,7 @@ namespace FallWeiss
         public bool shown = true;
         public void Show(bool v, bool force = false)
         {
+            if (mount != null && !crewShown) v = false;   // inside a hull: nothing to draw whatever the spotting says
             if (v == shown && !force) return; shown = v;
             if (rends != null) foreach (var r in rends) if (r && (!ring || r.gameObject != ring)) r.enabled = v;
         }
@@ -373,7 +378,7 @@ namespace FallWeiss
             var cands = new List<(float sc, float d, Unit e)>();
             foreach (var e in g.units)
             {
-                if (!e.alive || e.team == team || g.IsProt(e)) continue; float d = FU.Hyp(x - e.x, z - e.z); if (d > def.sight) continue;
+                if (!e.alive || e.team == team || g.IsProt(e) || (e.mount != null && !e.crewShown)) continue; float d = FU.Hyp(x - e.x, z - e.z); if (d > def.sight) continue;
                 float sc = d; if (def.pen && e.def.armor) sc -= 30; if (def.mg && !e.def.armor) sc -= 10; if (def.kind == "tank" && e.def.kind == "gun") sc -= 15; if (!def.pen && e.def.armor) sc += 40;
                 cands.Add((sc, d, e));
             }
@@ -435,7 +440,21 @@ namespace FallWeiss
                 eng = kind == "tank" ? g.audio.Follow(team == 0 ? "tank_ger" : "tank_pol", go.transform, 1, true, 8, 600, 0) : g.audio.Follow("hooves", go.transform, 1, true, 4, 300, 0);
                 if (!eng) return; eng.volume = 0;
             }
-            if (kind == "tank") { eng.pitch = Mathf.Lerp(eng.pitch, moving ? 1.05f : .8f, dt * 1.5f); eng.volume = Mathf.Lerp(eng.volume, (moving ? .75f : .4f) * SoundBank.WorldVol, dt * 2); }
+            if (kind == "tank")
+            {
+                if (immobile)
+                {   // engine or final drive gone (T29): the motor hunts and stumbles instead of idling
+                    float stumble = Mathf.PerlinNoise(Time.time * 2.3f, id * .37f); eng.pitch = Mathf.Lerp(eng.pitch, .55f + stumble * .3f, dt * 4); eng.volume = Mathf.Lerp(eng.volume, (.25f + stumble * .35f) * SoundBank.WorldVol, dt * 4);
+                }
+                else { eng.pitch = Mathf.Lerp(eng.pitch, moving ? 1.05f : .8f, dt * 1.5f); eng.volume = Mathf.Lerp(eng.volume, (moving ? .75f : .4f) * SoundBank.WorldVol, dt * 2); }
+                bool burning = hp < max * .3f;   // engine-bay fire once the hull is nearly done: smoke off the deck, a crackle the crew can hear
+                if (burning)
+                {
+                    if (!fireSrc) fireSrc = g.audio.Follow("fire_loop", go.transform, .6f, true, 5, 90, 0);
+                    smokeT -= dt; if (smokeT <= 0 && g.fx != null) { smokeT = .35f; var r = Quaternion.Euler(0, heading * Mathf.Rad2Deg, 0); var deck = new Vector3(x, y + 1.4f, z) + r * new Vector3(FU.Rand(-.4f, .4f), 0, -1.6f); g.fx.Puff(deck, new Color(.12f, .12f, .12f, .7f), 1.2f, 3.5f, 3.5f, Vector3.up * 2); }
+                }
+                else if (fireSrc) { fireSrc.Stop(); Object.Destroy(fireSrc); fireSrc = null; }
+            }
             else
             {
                 eng.volume = Mathf.Lerp(eng.volume, (moving ? (sprinting ? .75f : .55f) : 0) * SoundBank.WorldVol, dt * 6); eng.pitch = Mathf.Lerp(eng.pitch, sprinting ? 1.15f : 1, dt * 3);
@@ -445,6 +464,12 @@ namespace FallWeiss
         public void Update(Game g, float dt)
         {
             Sounds(g, dt);
+            if (mount != null && alive) { Crew.Mounted(g, this, dt); return; }
+            if (alive && def.kind == "tank")
+            {   // hatch drill: the commander rides up until rounds come in (or the player drops to the gunner's sight); repairs run for AI and player alike
+                buttoned = supp > .35f || g.t - lastHit < 8 || (this == g.player ? g.Ads > .5f : sprinting);
+                Crew.Repair(g, this, dt);
+            }
             if (!alive || this == g.player) return;
             if (dummy) { cd = 1; return; }
             Combat.Bleed(g, this, dt, true); if (!alive) return;
@@ -461,6 +486,7 @@ namespace FallWeiss
             {   // think rate scales with distance from the camera: a man in a firefight 400 m away does not need five decisions a second (raycasts in Acquire/Seen were the main CPU cost with 100+ units)
                 float lod = target != null && los ? 1 : g.ThinkScale(x, z); think = (.2f + Random.value * .15f) * lod;
                 if (focus == null) Acquire(g); else los = FU.Hyp(x - focus.x, z - focus.z) <= def.range && World.LOS(Eye, focus.Chest); Decide(g);
+                if (target == null && Foot) Crew.TryRecrew(g, this);
             }
             var tgt = focus ?? target; if (tgt != null && !tgt.alive) tgt = target = null;
             float d = tgt != null ? FU.Hyp(x - tgt.x, z - tgt.z) : 1e9f; bool engaged = tgt != null && d <= def.range && los; var o = order; bool forced = o != null && o.force;
@@ -637,6 +663,8 @@ namespace FallWeiss
         public static void NpcFire(Game g, Unit u, Unit t)
         {
             var def = u.def; if (def.pen && u.gunDead) { u.cd = 1; return; }   // main gun knocked out: the coax keeps working
+            if (u.crew != null && Crew.Alive(u) == 0) { u.cd = 1; return; }   // nobody left to serve it (T27): an abandoned gun is a silent gun
+            if (def.kind == "gun" && u.supp > .7f && Random.value < .6f) { u.cd = .8f; return; }   // the numbers are flat behind the shield: a suppressed gun loads slowly
             float ax = t.x - u.x, az = t.z - u.z, d = Mathf.Max(.01f, FU.Hyp(ax, az)), dx = ax / d, dz = az / d;
             var s = u.sv && u.sv.MuzzleWorld.HasValue && u.shown ? u.sv.MuzzleWorld.Value : !u.sv && u.muzzleT && u.shown ? u.muzzleT.position : new Vector3(u.x + dx * .9f, u.y + def.my * u.StM, u.z + dz * .9f);   // v4 models: the gun's muzzle marker
             float p = def.acc * (1 + .1f * u.vet) * (1 - .55f * d / def.range) * (1 - u.supp * .6f) * (u.Pinned ? .35f : 1); if (t.moving) p *= .7f; if (u.moving) p *= .6f; if (t == g.player) p *= .75f; if (u.moving && def.kind == "tank") p *= .7f; if (!def.pen && t.Foot && u.Foot) p *= .75f;   // lethal zones: AI riflemen trade fewer hits
@@ -748,11 +776,14 @@ namespace FallWeiss
         public static void Kill(Game g, Unit t, Unit by, bool head)
         {
             t.alive = false; t.hp = 0; t.order = null; g.selected.Remove(t); if (t.ring) t.ring.SetActive(false); t.deaths++;
+            var wasIn = t.mount; if (wasIn != null) Crew.Dismount(g, t, false, dead: true);   // a crewman: his body leaves the seat; the vehicle is charged the ticket, not the man
+            bool cook = (t.def.kind == "tank" && t.turret && (forceCookOff || Random.value < .4f)); if (t.def.kind == "tank") forceCookOff = false;
+            var survivors = new List<Unit>(); if (t.crew != null) foreach (var c in t.crew) if (c.alive && c.mount == t) survivors.Add(c);
             g.killLog[t.team, by == null ? 2 : by.team == t.team ? 1 : 0, by == null ? 3 : by.def.kind == "tank" ? 1 : by.def.kind == "gun" ? 2 : by.type == "mg" ? 3 : 0]++;   // balance telemetry: [victim team, enemy/friendly/none, rifle/tank/gun/mg]
             if (by != null && by.team != t.team) { int pts = 10; var ap = g.ActivePoint(); if (ap != null && by.team != g.M.attacker && FU.Hyp(by.x - ap.x, by.z - ap.z) < ap.r + 25) pts = 15; by.score += pts; }   // defending the active objective counts extra
             foreach (var c in t.go.GetComponentsInChildren<Collider>()) c.enabled = false;
             if (t.team == g.ME) g.losses++; else { g.kills++; g.cp += t.def.kind == "tank" ? 15 : 3; }
-            g.tix[t.team] -= t.def.kind == "tank" ? 4 : t.def.kind == "gun" ? 2 : 1;
+            g.tix[t.team] -= wasIn != null ? 0 : t.def.kind == "tank" ? 4 : t.def.kind == "gun" ? 2 : 1;
             if (by != null && by.alive && by.team != t.team)
             {
                 by.kills++; int v = Mathf.Min(3, by.kills / 3);
@@ -766,18 +797,24 @@ namespace FallWeiss
             else if (by != null && by.team == t.team && t.team == g.ME && Random.value < .6f) g.Msg(Defs.NAMES[t.team][t.type] + " killed by friendly fire.");
             if (t == g.player && by != null && by != t) g.Msg("Killed by " + Defs.NAMES[by.team][by.type] + (head ? " — headshot" : "") + " at " + range + " m");
             if (t.team != g.ME && t.def.kind == "inf" && Random.value < .2f) g.DropPickup(t.x, t.z);
-            t.SetVisible(true, true);
-            if (t.def.kind == "tank" || t.def.kind == "gun") Wreck(g, t);
-            if (t == g.player) g.OnPlayerDeath();
+            if (!(wasIn != null && !t.crewShown)) t.SetVisible(true, true);   // a man killed inside the hull leaves no body to draw
+            if (t.def.kind == "tank" || t.def.kind == "gun") { Wreck(g, t, cook); Crew.OnVehicleDead(g, t, by, cook); }
+            if (wasIn != null && wasIn.alive && wasIn.def.kind == "tank" && Crew.Alive(wasIn) == 0)
+            {   // the last man of the crew: the tank is a dead hull now, whatever its hull points say
+                if (wasIn == g.player) g.Msg("The crew is dead."); else if (by == g.player) g.Msg("Crew killed — " + Defs.NAMES[wasIn.team][wasIn.type] + " knocked out.");
+                Kill(g, wasIn, by, false); return;
+            }
+            if (t == g.player) { if (survivors.Count > 0 && !cook) g.PlayerBail(t, survivors[0]); else g.OnPlayerDeath(); }
         }
 
         /// RO2 vehicle death: the hull goes burnt-out black; if the ammunition cooks off the turret is blown off as a
         /// separate physics piece, otherwise it is left knocked askew. The wreck burns for minutes, not seconds.
         public static bool forceCookOff;   // test hook (dbg cookoff)
-        static void Wreck(Game g, Unit t)
+        static void Wreck(Game g, Unit t, bool cookOff)
         {
             foreach (var r in t.go.GetComponentsInChildren<Renderer>()) if (r.gameObject != t.ring) r.sharedMaterial = Mats.Burnt;
-            var p = new Vector3(t.x, t.y + 1.4f, t.z); bool cookOff = t.def.kind == "tank" && t.turret && (forceCookOff || Random.value < .4f); forceCookOff = false;
+            if (t.fireSrc) { t.fireSrc.Stop(); t.fireSrc = null; } t.repairT = 0;
+            var p = new Vector3(t.x, t.y + 1.4f, t.z);
             g.fx.Explosion(new Vector3(t.x, t.y + 1, t.z), cookOff ? 7 : 4); g.audio.Shot("boom", p);
             if (cookOff)
             {
@@ -812,7 +849,7 @@ namespace FallWeiss
                 g.fx.Puff(at, new Color(1, .85f, .5f, 1), .35f, .9f, .08f, Vector3.zero, true); g.fx.Puff(at, new Color(.6f, .6f, .6f, .6f), .3f, 1.4f, .8f, Vector3.up); g.audio.Shot("crack", at, .9f);
                 t.supp = Mathf.Min(1, t.supp + .35f); t.lastHit = g.t; if (by != null && by.alive && by.team != t.team) t.lastAtt = by;
                 if (by == g.player) g.Msg($"Ricochet — {gn} ({pen:0} mm) off the {face} plate ({eff:0} mm effective) at {dist:0} m. Close in or take it from the side.");
-                else if (t == g.player) g.Msg($"Ricochet off the {face} armour!");
+                else if (t == g.player) { g.Msg($"Ricochet off the {face} armour!"); g.audio.Shot("armor_ricochet", at, 1, true); g.Shake(.25f); }
                 return;
             }
             float r = Random.value, over = pen / eff; string what; float d;
@@ -823,7 +860,9 @@ namespace FallWeiss
             g.fx.Puff(at, new Color(1, .7f, .3f, 1), .5f, 1.6f, .12f, Vector3.zero, true); g.fx.Puff(at, new Color(.2f, .2f, .2f, .8f), .5f, 2.2f, 1.6f, Vector3.up * 1.5f); g.audio.Shot("debris", at, .8f);
             bool kill = t.hp - d <= 0;
             if (by == g.player) { g.Msg($"Penetration — {face} plate, {what} hit" + (kill ? " — knocked out!" : "")); g.HitMarker(kill, false); }
-            if (t == g.player) g.Msg($"Hit! {face} armour penetrated — {what}" + (t.immobile ? ". We can't move!" : t.gunDead ? ". Main gun is out!" : ""));
+            if (t == g.player) { g.Msg($"Hit! {face} armour penetrated — {what}" + (t.immobile ? ". We can't move!" : t.gunDead ? ". Main gun is out!" : "")); g.audio.Shot("armor_pen", at, 1, true); g.Shake(.9f); }
+            if (what == "crew" && !kill) Crew.KillOne(g, t, by);   // the share of the hull's life is a man: one of the crew dies (the tank follows when the last one goes)
+            if (!t.alive) return;
             Damage(g, t, d, true, false, by, false, true);
         }
 
