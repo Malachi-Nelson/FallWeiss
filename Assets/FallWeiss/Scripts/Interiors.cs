@@ -190,8 +190,8 @@ namespace FallWeiss
             foreach (var dc in bd.deco) { if (dc.owner != null && dc.owner.dead) continue; mb.Box(new Vector3(dc.x, by + dc.y, dc.z), new Vector3(dc.w, dc.h, dc.d), 0, FU.Hex(dc.hex)); }
             if (bd.gable && !bd.roofGone)
             {
-                float rh = Mathf.Clamp(Mathf.Min(bd.w, bd.d) * .4f, 1.4f, 3.8f); mb.Gable(new Vector3(bd.cx, by + bd.H, bd.cz), bd.w, bd.d, rh, 0, FU.Hex(bd.roofC));
-                if (bd.type == "house") mb.Box(new Vector3(bd.cx + (bd.w >= bd.d ? bd.w * .22f : 0), by + bd.H + rh * .45f, bd.cz + (bd.w >= bd.d ? 0 : bd.d * .22f)), new Vector3(.6f, rh * .8f + .8f, .6f), 0, FU.Hex(0x6a5a4a));
+                float rh = Mathf.Clamp(Mathf.Min(bd.w, bd.d) * .4f, 1.4f, 3.8f), ry = by + bd.H - .3f; mb.Gable(new Vector3(bd.cx, ry, bd.cz), bd.w, bd.d, rh, 0, FU.Hex(bd.roofC)); mb.GableEnds(new Vector3(bd.cx, ry, bd.cz), bd.w, bd.d, rh, 0, FU.Hex(bd.wall));
+                if (bd.type == "house") mb.Box(new Vector3(bd.cx + (bd.w >= bd.d ? bd.w * .22f : 0), ry + rh * .45f, bd.cz + (bd.w >= bd.d ? 0 : bd.d * .22f)), new Vector3(.6f, rh * .8f + .8f, .6f), 0, FU.Hex(0x6a5a4a));
             }
             bd.go = mb.Build("Building " + bd.k, parent, Mats.VC);
         }
@@ -203,7 +203,8 @@ namespace FallWeiss
             var c = new Vector3((b.x0 + b.x1) / 2, bd.baseY + (b.ry0 + b.ry1) / 2, (b.z0 + b.z1) / 2);
             for (int k = 0; k < 5; k++) g.fx.Puff(c + Random.insideUnitSphere * .6f, new Color(.66f, .61f, .53f, .8f), .8f, 2.6f, FU.Rand(1, 2), new Vector3(FU.Rand(-1.5f, 1.5f), FU.Rand(.5f, 2), 0));
             for (int k = 0; k < 4; k++) g.fx.Puff(c, new Color(.42f, .35f, .28f, 1), .25f, .2f, FU.Rand(.5f, .9f), new Vector3(FU.Rand(-4, 4), FU.Rand(2, 6), FU.Rand(-4, 4)), false, 22);
-            if (b.pk == "wall" || b.pk == "sill" || b.pk == "lintel" || b.pk == "pillar") bd.deadWalls++; g.audio.Shot("boom", c, .6f);
+            if (b.pk == "wall" || b.pk == "sill" || b.pk == "lintel" || b.pk == "pillar") bd.deadWalls++; g.audio.Shot("boom", c, .6f); g.audio.Shot("debris", c, .8f);
+            if (b.pk == "sill" || b.pk == "lintel") g.audio.Shot("glass", c, .9f);   // window frames: the panes go with them
             if (b.pk == "roof") bd.roofGone = true; Render(bd);
             if (bd.deadWalls > bd.wallCount * .55f && bd.alive) Collapse(g, bd);
         }
@@ -322,7 +323,9 @@ namespace FallWeiss
         public static void Collapse(Game g, Obst b)
         {
             if (b.bd != null) { Interiors.BreakPiece(g, b); return; }
-            if (b.dead) return; b.dead = true; if (b.col) Object.Destroy(b.col); if (b.vis) Object.Destroy(b.vis); g.RemoveBurning(b);
+            if (b.dead) return; b.dead = true; Nav.dirty = true; if (b.col) Object.Destroy(b.col); if (b.vis) Object.Destroy(b.vis); g.RemoveBurning(b);
+            if (b.link != null) foreach (var o in b.link) if (!o.dead) { o.dead = true; if (o.col) Object.Destroy(o.col); }
+            if (b.kind == "fence" || b.kind == "hedge") { World.BreakNear(g, b.x0, b.x1, b.z0, b.z1); return; }
             float cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
             if (b.low) { for (int k = 0; k < 4; k++) g.fx.Puff(new Vector3(cx + FU.Rand(-2, 2), b.y0 + .6f, cz), new Color(.54f, .48f, .33f, .8f), .5f, 1.4f, 1, new Vector3(FU.Rand(-2, 2), 2, 0)); return; }
             Rubble(g, b.x0, b.x1, b.z0, b.z1, b.y0, b.h, b.kind != "ruin");
@@ -337,8 +340,8 @@ namespace FallWeiss
             var rb = World.AddObst(x0, x1, z0, z1, 1.3f, true, 0); rb.soft = true; rb.y0 = y0; rb.y1 = y0 + 1.3f; World.MakeColliderPublic(rb);
             g.fx.Explosion(new Vector3(cx, y0 + 2, cz), Mathf.Max(5, Mathf.Min(w, d) * .6f));
             for (int k = 0; k < 14; k++) g.fx.Puff(new Vector3(cx + FU.Rand(-w / 2, w / 2), y0 + FU.Rand(1, h), cz + FU.Rand(-d / 2, d / 2)), new Color(.6f, .56f, .5f, .75f), 2, 7, FU.Rand(2, 4), new Vector3(FU.Rand(-2, 2), FU.Rand(1, 4), 0));
-            g.audio.Shot("boom", new Vector3(cx, y0, cz)); g.Shake(1.7f); if (announce) g.Msg("A building collapses!");
-            World.coverDirty = true;
+            g.audio.Shot("boom", new Vector3(cx, y0, cz)); g.audio.Shot("debris", new Vector3(cx, y0 + 2, cz)); g.audio.Shot("glass", new Vector3(cx, y0 + 2, cz), .8f); g.Shake(1.7f); if (announce) g.Msg("A building collapses!");
+            World.coverDirty = true; Nav.dirty = true;
         }
 
         // ---------------- AI cover points (port of buildCoverPts / findCover) ----------------
@@ -352,8 +355,12 @@ namespace FallWeiss
             foreach (var b in World.obst)
             {
                 if (b.dead || b.wire || b.nocover || b.floor) continue; bool low = b.low || b.h < 1.7f; float w = b.x1 - b.x0, d = b.z1 - b.z0, o = .95f;
-                for (float x = b.x0 + 1; x <= b.x1 - 1 + .01f; x += Mathf.Max(4, w / 3)) { Push(new Cover { x = x, z = b.z1 + o, n = new Vector2(0, 1), low = low, b = b }); Push(new Cover { x = x, z = b.z0 - o, n = new Vector2(0, -1), low = low, b = b }); }
-                if (!low) for (float z = b.z0 + 1; z <= b.z1 - 1 + .01f; z += Mathf.Max(4, d / 3)) { Push(new Cover { x = b.x0 - o, z = z, n = new Vector2(-1, 0), low = low, b = b }); Push(new Cover { x = b.x1 + o, z = z, n = new Vector2(1, 0), low = low, b = b }); }
+                // low cover faces along its long axis (of the whole chain for sandbag walls built from short boxes); a box under 2 m gets one point at its middle.
+                // Before, a box narrower than 2 m on x had no points at all, and low cover never had x-faces: every sandbag wall and north-south hedge or fence gave no cover.
+                float W = w, D = d; if (b.link != null && b.link.Count > 1) { float lx0 = 1e9f, lx1 = -1e9f, lz0 = 1e9f, lz1 = -1e9f; foreach (var o2 in b.link) { lx0 = Mathf.Min(lx0, o2.x0); lx1 = Mathf.Max(lx1, o2.x1); lz0 = Mathf.Min(lz0, o2.z0); lz1 = Mathf.Max(lz1, o2.z1); } W = lx1 - lx0; D = lz1 - lz0; }
+                bool zFaces = !low || W >= D, xFaces = !low || D > W;
+                if (zFaces) for (float x = w >= 2 ? b.x0 + 1 : (b.x0 + b.x1) / 2; x <= Mathf.Max(b.x1 - 1, (b.x0 + b.x1) / 2) + .01f; x += Mathf.Max(4, w / 3)) { Push(new Cover { x = x, z = b.z1 + o, n = new Vector2(0, 1), low = low, b = b }); Push(new Cover { x = x, z = b.z0 - o, n = new Vector2(0, -1), low = low, b = b }); }
+                if (xFaces) for (float z = d >= 2 ? b.z0 + 1 : (b.z0 + b.z1) / 2; z <= Mathf.Max(b.z1 - 1, (b.z0 + b.z1) / 2) + .01f; z += Mathf.Max(4, d / 3)) { Push(new Cover { x = b.x0 - o, z = z, n = new Vector2(-1, 0), low = low, b = b }); Push(new Cover { x = b.x1 + o, z = z, n = new Vector2(1, 0), low = low, b = b }); }
             }
             if (World.M.trenches != null) foreach (var t in World.M.trenches) for (int i = 0; i + 3 < t.pts.Length; i += 2)
                     {
@@ -361,6 +368,14 @@ namespace FallWeiss
                         for (int k = 0; k < n; k++) Push(new Cover { x = Mathf.Lerp(ax, bx, k / (float)n), z = Mathf.Lerp(az, bz, k / (float)n), trench = true });
                     }
             World.coverDirty = false;
+        }
+        /// Every cover point within r of (x, z) — for the AI deployment pass (defenders pick positions before the battle starts).
+        public static List<Cover> Near(float x, float z, float r)
+        {
+            if (World.coverDirty) BuildCover();
+            var o = new List<Cover>(); int n = Mathf.CeilToInt(r / 20), cx = Mathf.FloorToInt(x / 20), cz = Mathf.FloorToInt(z / 20);
+            for (int i = -n; i <= n; i++) for (int j = -n; j <= n; j++) if (grid.TryGetValue(Key(cx + i, cz + j), out var a)) foreach (var p in a) if (FU.Hyp(p.x - x, p.z - z) <= r) o.Add(p);
+            return o;
         }
         public static Cover Find(Unit u, float fx, float fz, float t)
         {

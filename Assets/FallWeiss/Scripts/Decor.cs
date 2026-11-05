@@ -33,6 +33,43 @@ namespace FallWeiss
             var b = AddObst(x0, x1, -z1, -z0, h, low, hp); b.y0 = H((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2); b.y1 = b.y0 + h; return b;
         }
         static float Lerp(float a, float b, float t) => a + (b - a) * t;
+
+        // ---------------- breakable fences / hedges (RO2: ROStaticMeshDestructible) ----------------
+        public class Breakable { public float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f; public GameObject go; public string kind; public bool dead; }
+        public static readonly List<Breakable> breakables = new List<Breakable>();
+        static MeshBatch chunkSaved; static Breakable chunk;
+        static void BeginChunk(string kind) { chunkSaved = dmb; dmb = new MeshBatch(); chunk = new Breakable { kind = kind }; }
+        static void Grow(float x, float z3, float m) { float z = -z3; chunk.x0 = Mathf.Min(chunk.x0, x - m); chunk.x1 = Mathf.Max(chunk.x1, x + m); chunk.z0 = Mathf.Min(chunk.z0, z - m); chunk.z1 = Mathf.Max(chunk.z1, z + m); }
+        static void EndChunk()
+        {
+            if (!dmb.Empty) { chunk.go = dmb.Build(chunk.kind == "hedge" ? "Hedge" : "Fence", root, Mats.VC); breakables.Add(chunk); }
+            dmb = chunkSaved; chunk = null;
+        }
+        /// Breaks every fence / hedge chunk overlapping the box (unity space): removes the chunk, its collision and
+        /// cover, and leaves splinters or flattened bushes. Called by tanks driving through and by explosions.
+        public static bool BreakNear(Game g, float x0, float x1, float z0, float z1)
+        {
+            bool any = false;
+            for (int i = 0; i < breakables.Count; i++)
+            {
+                var k = breakables[i]; if (k.dead || k.x1 < x0 || k.x0 > x1 || k.z1 < z0 || k.z0 > z1) continue;
+                k.dead = true; any = true; if (k.go) Object.Destroy(k.go);
+                foreach (var o in obst) if (!o.dead && (o.kind == "fence" || o.kind == "hedge") && (o.x0 + o.x1) / 2 > k.x0 && (o.x0 + o.x1) / 2 < k.x1 && (o.z0 + o.z1) / 2 > k.z0 && (o.z0 + o.z1) / 2 < k.z1) { o.dead = true; if (o.col) Object.Destroy(o.col); }
+                float cx = (k.x0 + k.x1) / 2, cz = (k.z0 + k.z1) / 2, w = k.x1 - k.x0, d = k.z1 - k.z0; bool hedge = k.kind == "hedge";
+                var mb = new MeshBatch();
+                for (int n = 0; n < (hedge ? 5 : 7); n++)
+                {
+                    float x = cx + FU.Rand(-w / 2, w / 2), z = cz + FU.Rand(-d / 2, d / 2), y = H(x, z);
+                    if (hedge) mb.PSph(new Vector3(x, y + .18f, z), new Vector3(FU.Rand(.9f, 1.5f), .35f, FU.Rand(.9f, 1.5f)), Quaternion.Euler(0, FU.Rand(0, 360), 0), FU.Hex(n % 2 == 0 ? 0x3d5a2c : 0x35502a));
+                    else mb.PBox(new Vector3(x, y + .04f, z), new Vector3(.08f, .06f, FU.Rand(1.2f, 2.6f)), Quaternion.Euler(FU.Rand(-6, 6), FU.Rand(0, 360), FU.Rand(-8, 8)), FU.Hex(n % 3 == 0 ? 0x5a4630 : 0x7a6448));
+                }
+                mb.Build(hedge ? "Hedge (flattened)" : "Fence (broken)", root, Mats.VC, false);
+                for (int n = 0; n < 4; n++) g.fx.Puff(new Vector3(cx + FU.Rand(-w / 3, w / 3), H(cx, cz) + .6f, cz + FU.Rand(-d / 3, d / 3)), hedge ? new Color(.3f, .42f, .22f, .8f) : new Color(.54f, .48f, .33f, .8f), .5f, 1.6f, 1.1f, new Vector3(FU.Rand(-1.5f, 1.5f), 1.8f, FU.Rand(-1.5f, 1.5f)));
+                g.audio.Shot(g.audio.Has("debris") ? "debris" : "rifle", new Vector3(cx, H(cx, cz), cz), .6f);   // fence / hedge flattened: splintering wood
+            }
+            if (any) { coverDirty = true; Nav.dirty = true; }
+            return any;
+        }
         static float Rnd(float a, float b) => FU.Rand(a, b);
 
         static void DecorPort(MeshBatch mb, Rng R)
@@ -48,18 +85,29 @@ namespace FallWeiss
                     case "fence":
                         {
                             float x1 = V(0), z1 = V(1), x2 = V(2), z2 = V(3), L = FU.Hyp(x2 - x1, z2 - z1), ang = Mathf.Atan2(x2 - x1, z2 - z1); int n = Mathf.Max(1, Mathf.RoundToInt(L / 3));
-                            for (int i = 0; i <= n; i++) { float x = Lerp(x1, x2, i / (float)n), z = Lerp(z1, z2, i / (float)n); if (Okp(x, z, 1.5f)) Bx(.12f, 1.15f, .12f, x, Gy(x, z) + .55f, z, 0x5a4630); }
-                            for (int i = 0; i < n; i++)
-                            {
-                                float xa = Lerp(x1, x2, i / (float)n), za = Lerp(z1, z2, i / (float)n), xb = Lerp(x1, x2, (i + 1) / (float)n), zb = Lerp(z1, z2, (i + 1) / (float)n), mx = (xa + xb) / 2, mz = (za + zb) / 2; if (!Okp(mx, mz, 1.5f)) continue;
-                                foreach (var hh in new[] { .4f, .85f }) Bx(.05f, .07f, FU.Hyp(xb - xa, zb - za), mx, (Gy(xa, za) + Gy(xb, zb)) / 2 + hh, mz, 0x7a6448, 0, ang, 0);
+                            for (int c0 = 0; c0 < n; c0 += 2)
+                            {   // each ~6 m chunk is its own object so a tank can break it
+                                int c1 = Mathf.Min(n, c0 + 2); BeginChunk("fence");
+                                for (int i = c0; i <= c1; i++) { if (i == c1 && c1 < n) continue; float x = Lerp(x1, x2, i / (float)n), z = Lerp(z1, z2, i / (float)n); Grow(x, z, .6f); if (Okp(x, z, 1.5f)) Bx(.12f, 1.15f, .12f, x, Gy(x, z) + .55f, z, 0x5a4630); }
+                                for (int i = c0; i < c1; i++)
+                                {
+                                    float xa = Lerp(x1, x2, i / (float)n), za = Lerp(z1, z2, i / (float)n), xb = Lerp(x1, x2, (i + 1) / (float)n), zb = Lerp(z1, z2, (i + 1) / (float)n), mx = (xa + xb) / 2, mz = (za + zb) / 2; Grow(mx, mz, .6f); if (!Okp(mx, mz, 1.5f)) continue;
+                                    foreach (var hh in new[] { .4f, .85f }) Bx(.05f, .07f, FU.Hyp(xb - xa, zb - za), mx, (Gy(xa, za) + Gy(xb, zb)) / 2 + hh, mz, 0x7a6448, 0, ang, 0);
+                                }
+                                EndChunk();
                             }
                             break;
                         }
                     case "hedge":
                         {
                             float x1 = V(0), z1 = V(1), x2 = V(2), z2 = V(3), L = FU.Hyp(x2 - x1, z2 - z1); int n = Mathf.Max(1, Mathf.RoundToInt(L / 2.2f)); int[] cs = { 0x3d5a2c, 0x486332, 0x35502a };
-                            for (int i = 0; i <= n; i++) { float x = Lerp(x1, x2, i / (float)n) + Rnd(-.3f, .3f), z = Lerp(z1, z2, i / (float)n) + Rnd(-.3f, .3f); if (!Okp(x, z, 1) || NearRoad3(x, z, 1.5f)) continue; float r = Rnd(.8f, 1.15f); Sp(r, r * .75f, r, x, Gy(x, z) + .55f, z, cs[i % 3]); }
+                            for (int i = 0; i <= n; i++)
+                            {   // three bushes per breakable chunk
+                                if (i % 3 == 0) BeginChunk("hedge");
+                                float x = Lerp(x1, x2, i / (float)n) + Rnd(-.3f, .3f), z = Lerp(z1, z2, i / (float)n) + Rnd(-.3f, .3f); Grow(x, z, 1.1f);
+                                if (Okp(x, z, 1) && !NearRoad3(x, z, 1.5f)) { float r = Rnd(.8f, 1.15f); Sp(r, r * .75f, r, x, Gy(x, z) + .55f, z, cs[i % 3]); }
+                                if (i % 3 == 2 || i == n) EndChunk();
+                            }
                             break;
                         }
                     case "rocks":
@@ -133,7 +181,7 @@ namespace FallWeiss
                             {
                                 float mx = Lerp(x1, x2, (i + .5f) / n), mz = Lerp(z1, z2, (i + .5f) / n); if (!Okp(mx, mz, 1.3f) || NearRoad3(mx, mz, -1)) continue; float y = Gy(mx, mz);
                                 Bx(.75f, hh + .3f, sl + .1f, mx, y + hh / 2 - .05f, mz, wallC[(int)(R.Next() * 3) % 3], 0, ang); Bx(.98f, .16f, sl + .1f, mx, y + hh + .1f, mz, 0x6f6a60, 0, ang);
-                                Solid3(mx - sA * sl / 2 - .45f, mx + sA * sl / 2 + .45f, mz - cA * sl / 2 - .45f, mz + cA * sl / 2 + .45f, hh, 0, hh < 2);
+                                OrientedObst(mx, -mz, sl, .9f, Mathf.Atan2(x2 - x1, -(z2 - z1)), hh, 0, hh < 2, null);
                             }
                             break;
                         }
@@ -180,7 +228,8 @@ namespace FallWeiss
                             foreach (var e in new[] { -1f, 1f }) Bx(1.8f, .9f, 1.3f, bx + c * e * len * .55f, y + .45f, bz - s * e * len * .55f, 0x8a7a55, 0, rot);
                             Cy(.38f, .38f, .95f, bx + c * len * .2f, y + 1.7f, bz - s * len * .2f, 0x7a2a22); Bx(len * .8f, .12f, .12f, bx, y + .9f, bz + .38f, 0x4a3a28, 0, rot, .35f);
                             float ac = Mathf.Abs(c), asn = Mathf.Abs(s);
-                            Solid3(bx - ac * (len / 2 + 1) - asn * .8f, bx + ac * (len / 2 + 1) + asn * .8f, bz - asn * (len / 2 + 1) - ac * .8f, bz + asn * (len / 2 + 1) + ac * .8f, 1.2f, 0, true);
+                            float ga = Mathf.Atan2(c, s); OrientedObst(bx, -bz, len, .75f, ga, 1.25f, 0, true, null);
+                            foreach (var e in new[] { -1f, 1f }) OrientedObst(bx + c * e * len * .55f, -(bz - s * e * len * .55f), 1.8f, 1.3f, ga, .9f, 0, true, null);
                             break;
                         }
                     case "fountain":
@@ -246,7 +295,7 @@ namespace FallWeiss
                             q = W(3.1f, 0); Bx(2.6f, 3, 2.8f, q.x, y + 2.5f, q.y, 0x3a2e26, 0, rot); Bx(3, .2f, 3.2f, q.x, y + 4.1f, q.y, 0x22201e, 0, rot);
                             q = W(-3.9f, 0); Cy(.45f, .65f, 1.7f, q.x, y + 3.6f, q.y, 0x1c1a18); q = W(.2f, 0); Cy(.5f, .5f, .8f, q.x, y + 3.4f, q.y, 0x5a3a2c);
                             foreach (var u in new[] { -3f, -1.2f, .8f, 3.2f }) foreach (var v in new[] { -1.2f, 1.2f }) { q = W(u, v); Bx(1.4f, 1.4f, .25f, q.x, y + .5f, q.y, 0x5a3a2c, 0, rot); }
-                            float hx = Mathf.Abs(s) > .7f ? 1.7f : 5.2f, hz = Mathf.Abs(s) > .7f ? 5.2f : 1.7f; Solid3(x - hx, x + hx, z - hz, z + hz, 4.2f, 0, false);
+                            OrientedObst(x, -z, 10.4f, 3.2f, Mathf.Atan2(c, s), 4.2f, 0, false, null);
                             break;
                         }
                     case "derailed":
@@ -254,7 +303,7 @@ namespace FallWeiss
                             float x = V(0), z = V(1), rot = V(2), tilt = V(3), y = Gy(x, z);
                             Bx(12, 3.4f, 3.2f, x, y + 1.7f, z, 0x5a3626, 0, rot, tilt); Bx(12.2f, .3f, 3.4f, x, y + 3.5f, z, 0x2a2a2a, 0, rot, tilt); Bx(.3f, 2.4f, 1.6f, x, y + 1.5f, z, 0x2a1c14, 0, rot, tilt);
                             for (int i = 0; i < 2; i++) Bx(1.2f, 1.2f, .28f, x + Rnd(-5, 5), y + .55f, z + Rnd(-3, 3), 0x4a3a2c, Rnd(-.3f, .3f), Rnd(0, 3), Rnd(0, 1));
-                            bool al = Mathf.Abs(Mathf.Sin(rot)) > .7f; Solid3(x - (al ? 2.4f : 6.2f), x + (al ? 2.4f : 6.2f), z - (al ? 6.2f : 2.4f), z + (al ? 6.2f : 2.4f), 3.6f, 0, false);
+                            OrientedObst(x, -z, 12.2f, 3.4f, Mathf.Atan2(Mathf.Cos(rot), Mathf.Sin(rot)), 3.6f, 0, false, null);
                             break;
                         }
                     case "pier":
@@ -292,8 +341,8 @@ namespace FallWeiss
             }
             if (M.city)
             {
-                for (int i = 0; i < 16; i++) { float x = rr(-Hh + 20, Hh - 20), z = rr(-Hh + 20, Hh - 20); if (ok(x, z)) Add("rubble", x, z, rr(2, 4), Mathf.Round(rr(7, 13))); }
-                foreach (var p in roadPts(5, 3.5f)) if (ClearOfKey(p.x, -p.y, 24)) Add("barricade", p.x, p.y, 7, p.z + 1.2f);
+                for (int i = 0; i < 16 * AreaK; i++) { float x = rr(-Hh + 20, Hh - 20), z = rr(-Hh + 20, Hh - 20); if (ok(x, z)) Add("rubble", x, z, rr(2, 4), Mathf.Round(rr(7, 13))); }
+                foreach (var p in roadPts(Mathf.RoundToInt(5 * Mathf.Sqrt(AreaK)), 3.5f)) if (ClearOfKey(p.x, -p.y, 24)) Add("barricade", p.x, p.y, 7, p.z + 1.2f);
                 foreach (var ln in M.lanes)
                 {
                     float l0 = ln.x1, l1 = -ln.z1, l2 = ln.x2, l3 = -ln.z2, dx = l2 - l0, dz = l3 - l1, len = Mathf.Max(.01f, FU.Hyp(dx, dz));
@@ -306,12 +355,12 @@ namespace FallWeiss
             }
             else
             {
-                for (int i = 0; i < 26; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z)) Add("bushes", x, z, rr(4, 9), Mathf.Round(rr(3, 7))); }
-                for (int i = 0; i < 14; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z) && Slope(x, -z) < .25f) Add("flowers", x, z, rr(5, 11), Mathf.Round(rr(25, 55))); }
-                foreach (var p in roadPts(3, 3.5f)) Add("shrine", p.x, p.y);
+                for (int i = 0; i < 26 * AreaK; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z)) Add("bushes", x, z, rr(4, 9), Mathf.Round(rr(3, 7))); }
+                for (int i = 0; i < 14 * AreaK; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z) && Slope(x, -z) < .25f) Add("flowers", x, z, rr(5, 11), Mathf.Round(rr(25, 55))); }
+                foreach (var p in roadPts(Mathf.RoundToInt(3 * Mathf.Sqrt(AreaK)), 3.5f)) Add("shrine", p.x, p.y);   // roadside kapliczki
                 var houses = new List<FBuild>(); foreach (var b in M.build) if (b.k == "house" || b.k == "barn" || b.k == "villa") houses.Add(b);
                 for (int i = houses.Count - 1; i > 0; i--) { int j = (int)(R.Next() * (i + 1)) % (i + 1); var tmp = houses[i]; houses[i] = houses[j]; houses[j] = tmp; }
-                for (int i = 0; i < Mathf.Min(5, houses.Count); i++) { var b = houses[i]; float bz = -b.z; Add("stonewall", b.x - 6, bz + 10, b.x + 6, bz + 10, 1.3f); }
+                for (int i = 0; i < Mathf.Min(Mathf.RoundToInt(5 * Mathf.Sqrt(AreaK)), houses.Count); i++) { var b = houses[i]; float bz = -b.z; Add("stonewall", b.x - 6, bz + 10, b.x + 6, bz + 10, 1.3f); }
                 foreach (var r in roads)
                     if (FU.Hyp(r[2] - r[0], r[3] - r[1]) > 120 && R.Next() < .6f)
                     {
@@ -325,7 +374,7 @@ namespace FallWeiss
         /// Port of groundPatches(): soft-coloured dirt / grass / rubble discs breaking up the ground.
         static void GroundPatches(MeshBatch mb, Rng R)
         {
-            int N = M.city ? 46 : 90, n = 0; float Hh = M.half;
+            int N = Mathf.RoundToInt((M.city ? 46 : 90) * AreaK), n = 0; float Hh = M.half;
             int[] pal = M.city ? new[] { 0x4b4741, 0x7d776c, 0x39362f, 0x8c8578, 0x5f574a } : new[] { 0x765f3a, 0x4d3f2a, 0x8d8050, 0x5c7a38, 0x6a6a52, 0x9a8a5e };
             for (int i = 0; i < N * 4 && n < N; i++)
             {

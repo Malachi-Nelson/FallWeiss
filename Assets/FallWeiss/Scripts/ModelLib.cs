@@ -11,11 +11,16 @@ namespace FallWeiss
     public static class ModelLib
     {
         class Node { public string name; public Vector3 p; public Quaternion q; public Vector3 s; public Mesh mesh; public Node[] kids; }
-        static Dictionary<string, Node> models;
+        static Dictionary<string, Node> models; static Mesh sentinel;
+        /// Enter Play Mode with Domain Reload OFF (this project's setting) keeps statics alive between Play sessions, but Unity destroys
+        /// every Mesh created in Play mode when Play stops. The cache then held dead meshes, Build() skipped the MeshRenderer, and the
+        /// second Play session had invisible soldiers and an invisible first-person Kar98k. Reset on every Play start, and re-check.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)] static void ResetStatics() { models = null; sentinel = null; }
+        static void Ensure() { if (models == null || (sentinel is object && !sentinel)) Load(); }
 
         static void Load()
         {
-            models = new Dictionary<string, Node>();
+            models = new Dictionary<string, Node>(); sentinel = null;
             var ta = Resources.Load<TextAsset>("models"); if (!ta) { Debug.LogError("[FallWeiss] Resources/models.bytes missing"); return; }
             using var br = new BinaryReader(new MemoryStream(ta.bytes));
             if (Encoding.ASCII.GetString(br.ReadBytes(4)) != "FWM1") { Debug.LogError("[FallWeiss] bad models.bytes"); return; }
@@ -38,7 +43,7 @@ namespace FallWeiss
                 for (int i = 0; i < vc; i++) col[i] = new Color(br.ReadByte() / 255f, br.ReadByte() / 255f, br.ReadByte() / 255f).linear;
                 int ic = br.ReadInt32(); var idx = new int[ic]; for (int i = 0; i < ic; i++) idx[i] = br.ReadInt32();
                 var m = new Mesh { name = model + "/" + nd.name, indexFormat = vc > 65000 ? IndexFormat.UInt32 : IndexFormat.UInt16 };
-                m.vertices = pos; m.normals = Smooth(pos, nor, 50); m.colors = col; m.triangles = idx; m.RecalculateBounds(); nd.mesh = m;
+                m.vertices = pos; m.normals = Smooth(pos, nor, 50); m.colors = col; m.triangles = idx; m.RecalculateBounds(); nd.mesh = m; if (sentinel is null) sentinel = m;
             }
             int kc = br.ReadInt32(); nd.kids = new Node[kc];
             for (int i = 0; i < kc; i++) nd.kids[i] = ReadNode(br, model);
@@ -61,12 +66,12 @@ namespace FallWeiss
             return outN;
         }
 
-        public static bool Has(string name) { if (models == null) Load(); return models.ContainsKey(name); }
+        public static bool Has(string name) { Ensure(); return models.ContainsKey(name); }
 
         /// Instantiates a model hierarchy. Named pivots (hip, upper, leg0, turret, blades...) keep their names.
         public static GameObject Spawn(string name, Transform parent, bool shadows = true, Material mat = null)
         {
-            if (models == null) Load();
+            Ensure();
             if (!models.TryGetValue(name, out var nd)) { Debug.LogWarning("[FallWeiss] no model " + name); return new GameObject(name); }
             var go = Build(nd, parent, shadows, mat ?? Mats.VC); go.name = name; return go;
         }

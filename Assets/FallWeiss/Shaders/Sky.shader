@@ -31,7 +31,10 @@ Shader "FallWeiss/Sky"
                 float3 c = lerp(_Hor.rgb, _Top.rgb, pow(h, 0.55));
                 if (d.y < 0) c = lerp(_Hor.rgb, _Hor.rgb * 0.72, saturate(-d.y * 5));
                 float s = saturate(dot(d, normalize(_SunDir.xyz)));
-                c += _SunC.rgb * (pow(s, 900) * 6 + pow(s, 64) * 0.35 + pow(s, 8) * 0.12);
+                // disc + glow. Was 6 / .35 / .12: a 6x HDR disc through bloom was a white sheet when the sun sat low in front of the attacker.
+                // The disc fades as it nears the horizon (atmosphere), the glows stay modest so the sky brightens but never blinds.
+                float low = saturate(_SunDir.y * 6 + 0.2);                      // 0 at/below the horizon, 1 above ~8 deg
+                c += _SunC.rgb * (pow(s, 1200) * lerp(1.2, 2.4, low) + pow(s, 64) * 0.22 + pow(s, 8) * 0.07);
                 return half4(c, 1);
             }
             ENDHLSL

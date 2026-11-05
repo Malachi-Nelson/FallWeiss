@@ -1,4 +1,8 @@
 // Simple URP lit shader driven by mesh vertex colours (terrain, buildings, trees, decor).
+// _Detail = 1 (terrain only): per-pixel ground texture. Three octaves of value noise on an INTEGER hash — the previous
+// sin()-based hash was quasi-periodic (~4 cells) and drew an axis-aligned checkerboard on every field — rotated against the
+// terrain grid, each fading with distance so nothing shimmers on the horizon. Vertices with alpha < 1 are ploughed fields:
+// furrows are drawn here per pixel instead of being sampled on the 2 m vertex grid (which produced moiré).
 Shader "FallWeiss/VertexColorLit"
 {
     Properties
@@ -38,6 +42,20 @@ Shader "FallWeiss/VertexColorLit"
                 half   fog        : TEXCOORD2;
             };
 
+            // integer hash (PCG-style mix) -> [0,1); no visible structure between neighbouring cells
+            float hash21(float2 c)
+            {
+                uint2 u = uint2(int2(floor(c)) + 32768);
+                uint h = u.x * 374761393u ^ u.y * 668265263u;
+                h = (h ^ (h >> 13)) * 1274126177u; h ^= h >> 16;
+                return float(h & 0x00FFFFFFu) * (1.0 / 16777216.0);
+            }
+            float vnoise(float2 q)
+            {
+                float2 fl = floor(q), f = frac(q); f = f * f * (3 - 2 * f);
+                return lerp(lerp(hash21(fl), hash21(fl + float2(1, 0)), f.x), lerp(hash21(fl + float2(0, 1)), hash21(fl + float2(1, 1)), f.x), f.y);
+            }
+
             Varyings vert (Attributes i)
             {
                 Varyings o;
@@ -58,15 +76,23 @@ Shader "FallWeiss/VertexColorLit"
                 half nd = saturate(dot(n, l.direction));
                 half3 amb = SampleSH(n);
                 if (_Detail > 0.5)
-                {   // break up flat vertex colours: two octaves of cheap value noise + fine grain, fading with distance
+                {
                     float2 p = i.positionWS.xz;
-                    float n1 = frac(sin(dot(floor(p * 1.7), float2(12.9898, 78.233))) * 43758.5453);
-                    float2 q = p * 0.18; float2 f = frac(q); float2 fl = floor(q); f = f * f * (3 - 2 * f);
-                    float a = frac(sin(dot(fl, float2(127.1, 311.7))) * 43758.5), b = frac(sin(dot(fl + float2(1,0), float2(127.1, 311.7))) * 43758.5);
-                    float c2 = frac(sin(dot(fl + float2(0,1), float2(127.1, 311.7))) * 43758.5), d2 = frac(sin(dot(fl + float2(1,1), float2(127.1, 311.7))) * 43758.5);
-                    float n2 = lerp(lerp(a, b, f.x), lerp(c2, d2, f.x), f.y);
                     float dist = length(i.positionWS - GetCameraPositionWS());
-                    float k = 1 + ((n1 - 0.5) * 0.10 * saturate(1 - dist / 90) + (n2 - 0.5) * 0.16);
+                    float2 pA = float2(p.x * 0.80 - p.y * 0.60, p.x * 0.60 + p.y * 0.80);   // 37°
+                    float2 pB = float2(p.x * 0.29 + p.y * 0.96, -p.x * 0.96 + p.y * 0.29);  // 73°
+                    float nA = vnoise(pA * 0.033 + 3.1);             // ~30 m patches: soil, moisture, grazing
+                    float nB = vnoise(pB * 0.17 + 11.0);             // ~6 m tufts
+                    float nC = hash21(floor(p * 1.7));               // 0.6 m grain, near the player only
+                    float k = 1 + (nA - 0.5) * 0.14
+                                + (nB - 0.5) * 0.12 * saturate(1 - dist / 450)
+                                + (nC - 0.5) * 0.10 * saturate(1 - dist / 90);
+                    if (i.color.a < 0.75)
+                    {   // ploughed field: 1.6 m furrows along the same rotated axis the CPU uses for field parcels (a = 0.5 rad)
+                        float fx = dot(p, float2(0.8776, 0.4794));
+                        float fur = 0.5 + 0.5 * cos(fx * 3.927);     // 2π / 1.6
+                        k *= 1 - 0.09 * fur * saturate(1 - dist / 160);
+                    }
                     i.color.rgb *= k;
                 }
                 half3 c = i.color.rgb * (amb + l.color * nd * l.shadowAttenuation);

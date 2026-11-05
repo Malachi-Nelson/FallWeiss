@@ -38,6 +38,8 @@ namespace FallWeiss
         public GameObject roundPrefab, caseK98, casePistol, caseMG, rocketPrefab;
         [Tooltip("Master switch: off = every unit keeps the original procedural model.")]
         public bool useModels = true;
+        [Tooltip("v4 models (models.bytes): when on, every soldier on both sides, the Test Range included, uses the v4 procedural model with its fitted hit volumes, and the POLYGON pack is not used. Turn off to go back to the pack.")]
+        public bool preferV4Models = true;
         [Tooltip("Per team (0 = Wehrmacht, 1 = Polish Army). The pack only has German uniforms, so Polish units keep the procedural model by default.")]
         public bool[] teams = { true, false };
         public SoldierModel[] models;                  // Wehrmacht A/B/C (+ SS A/B, unused by default)
@@ -47,7 +49,7 @@ namespace FallWeiss
         static SoldierLib inst; static bool tried;
         public static SoldierLib I { get { if (!inst && !tried) { tried = true; inst = Resources.Load<SoldierLib>("SoldierLib"); } return inst; } }
         public static bool forceAll;   // Test Range: POLYGON models for both sides
-        public bool Use(int team) => (forceAll && controller && models != null && models.Length > 0) || useModels && controller && models != null && models.Length > 0 && team >= 0 && team < teams.Length && teams[team];
+        public bool Use(int team) => !preferV4Models && ((forceAll && controller && models != null && models.Length > 0) || useModels && controller && models != null && models.Length > 0 && team >= 0 && team < teams.Length && teams[team]);
 
         /// Game weapon id -> pack weapon key (mesh + clip prefix).
         public static string WeaponKey(string gameWeapon, string unitType)
@@ -61,6 +63,7 @@ namespace FallWeiss
                 case "panzerschreck": return "Panzerschreck";
                 case "panzerfaust": return "Panzerfaust";
                 case "stg44": return "STG44";
+                case "kar98k": case "wz29": case "kar98kz": case "wz29z": case "bayonet": case "sabre": return "K98";   // rifles map by weapon, never by unit type (the Test Range hands every class every gun)
                 default: return unitType == "mg" ? "MG42" : "K98";   // kar98k, wz29, scoped rifles, bayonet
             }
         }

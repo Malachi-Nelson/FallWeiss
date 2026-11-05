@@ -2,7 +2,7 @@
 // Drop a text file at Logs/fallweiss_input.txt (next to Assets/ in the editor, next to the .exe in a build) and it is
 // executed line by line, injecting real Input System events, so every key binding is exercised exactly as a player would.
 // Commands:  wait s | tap KEY | hold KEY s | down KEY | up KEY | look dx dy s | lmb s | rmb s | click x y [right]
-//            mission idx side | range | shot name | log text | timescale v
+//            mission idx side | range | shot name | log text | timescale v | lmbdown | lmbup | rmbdown | rmbup
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -58,10 +58,13 @@ namespace FallWeiss
             try { File.WriteAllText(logPath, $"test run {System.DateTime.Now}\n"); } catch { }
             pos = new Vector2(Screen.width / 2f, Screen.height / 2f);
             var game = FindAnyObjectByType<Game>();
+            try
+            {
             foreach (var raw in lines)
             {
                 var ln = raw.Trim(); if (ln.Length == 0 || ln.StartsWith("#")) continue;
                 var a = ln.Split(' '); var cmd = a[0].ToLowerInvariant(); Key k;
+                if (a.Length < 2 && (cmd == "tap" || cmd == "down" || cmd == "up" || cmd == "hold" || cmd == "shot" || cmd == "click")) { Log("missing argument: " + ln); continue; }   // a bare "tap" used to throw and kill the driver for the session
                 float F(int i, float d = 0) => a.Length > i && float.TryParse(a[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : d;
                 switch (cmd)
                 {
@@ -86,6 +89,10 @@ namespace FallWeiss
                             float e = Time.realtimeSinceStartup + F(1, .1f); while (Time.realtimeSinceStartup < e) yield return null;
                             lmb = rmb = false; SendMouse(Vector2.zero); yield return null; break;
                         }
+                    case "lmbdown": lmb = true; SendMouse(Vector2.zero); yield return null; break;   // hold a button across other commands (ADS + shot)
+                    case "lmbup": lmb = false; SendMouse(Vector2.zero); yield return null; break;
+                    case "rmbdown": rmb = true; SendMouse(Vector2.zero); yield return null; break;
+                    case "rmbup": rmb = false; SendMouse(Vector2.zero); yield return null; break;
                     case "click":
                         {   // x/y in 1920x1080 HUD space, origin top-left
                             float sx = Screen.width / 1920f, sy = Screen.height / 1080f; pos = new Vector2(F(1) * sx, Screen.height - F(2) * sy);
@@ -94,7 +101,8 @@ namespace FallWeiss
                             lmb = rmb = false; SendMouse(Vector2.zero); yield return null; break;
                         }
                     case "mission":
-                        if (game) { game.StartMission((int)F(1), (int)F(2)); } yield return null; yield return null; break;
+                        if (game) { game.StartMission((int)F(1), (int)F(2), false); } yield return null; yield return null; break;   // automated runs skip the deployment phase
+                    case "deploy": if (game) { game.StartMission((int)F(1), (int)F(2), true); } yield return null; yield return null; break;   // with the pre-game deployment phase
                     case "range": if (game) { game.StartRange(); } yield return null; yield return null; break;
                     case "timescale": Time.timeScale = F(1, 1); break;
                     case "shot":
@@ -111,11 +119,16 @@ namespace FallWeiss
                 }
                 if (game) Log($"{ln}  -> state={game.state} rts={game.rts} hp={(game.player != null ? game.player.hp : -1):0} pos=({(game.player != null ? game.player.x : 0):0},{(game.player != null ? game.player.z : 0):0}) tp={game.tp} cam={(Camera.main ? Camera.main.transform.position.ToString("F1") : "-")}");
             }
-            down.Clear(); SendKeys(); lmb = rmb = false; SendMouse(Vector2.zero);
+            }
+            finally
+            {   // always release keys, restore the editor's input settings and accept the next script, even if a command threw
+                down.Clear(); SendKeys(); lmb = rmb = false; SendMouse(Vector2.zero);
 #if UNITY_EDITOR
-            set.backgroundBehavior = bb; set.editorInputBehaviorInPlayMode = eb;
+                set.backgroundBehavior = bb; set.editorInputBehaviorInPlayMode = eb;
 #endif
-            Log("done"); busy = false;
+                busy = false;
+            }
+            Log("done");
         }
     }
 }

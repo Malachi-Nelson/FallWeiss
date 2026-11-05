@@ -10,10 +10,11 @@ namespace FallWeiss
 {
     public class Visuals
     {
-        Camera cam; Light sun; Material skyMat; Volume vol; Vignette vig; ColorAdjustments grade; Bloom bloom;
+        Camera cam; Light sun; Material skyMat; Volume vol; Vignette vig; ColorAdjustments grade; Bloom bloom; MaterialPropertyBlock cloudMpb;
         readonly List<Transform> clouds = new List<Transform>(); Transform cloudRoot;
         ParticleSystem rain; Mission M;
-        Mesh grassMesh; readonly List<Matrix4x4[]> grass = new List<Matrix4x4[]>(); Material[] grassMats; RenderParams[] grassRP;
+        Mesh grassMesh; readonly Dictionary<(int, int), List<Matrix4x4[]>> grass = new Dictionary<(int, int), List<Matrix4x4[]>>(); Material[] grassMats; RenderParams[] grassRP;
+        const float GrassCell = 80; float grassDist = 140;
         Color top, hor, sunc; Vector3 sunDir; float fogNear, fogFar;
         public float rainI;
 
@@ -23,20 +24,38 @@ namespace FallWeiss
             var sh = Shader.Find("FallWeiss/Sky"); if (!sh) { var r = Resources.Load<Material>("FallWeissSky"); if (r) sh = r.shader; }
             if (sh) skyMat = new Material(sh);
             // post-processing volume (replaces the template profile at runtime; the asset on disk is untouched)
-            vol = Object.FindAnyObjectByType<Volume>();
+            vol = Object.FindAnyObjectByType<Volume>(); if (vol && !vol.isGlobal) vol = null;   // a local (collider) volume would confine the whole post stack to its box
             if (!vol) { var g = new GameObject("Global Volume"); vol = g.AddComponent<Volume>(); vol.isGlobal = true; }
             var prof = ScriptableObject.CreateInstance<VolumeProfile>(); vol.profile = prof; vol.priority = 10;
             var tm = prof.Add<Tonemapping>(true); tm.mode.Override(TonemappingMode.ACES);
-            bloom = prof.Add<Bloom>(true); bloom.threshold.Override(1.0f); bloom.intensity.Override(.45f); bloom.scatter.Override(.65f);
-            grade = prof.Add<ColorAdjustments>(true); grade.postExposure.Override(.5f); grade.contrast.Override(12); grade.saturation.Override(-6);
+            bloom = prof.Add<Bloom>(true); bloom.threshold.Override(1.35f); bloom.intensity.Override(.28f); bloom.scatter.Override(.5f);   // was 1.0 / .45 / .65: with the 6x sun disc that smeared a quarter-screen halo and blinded anyone facing the dawn (Mokra)
+            grade = prof.Add<ColorAdjustments>(true); grade.postExposure.Override(.3f); grade.contrast.Override(12); grade.saturation.Override(-6);
             vig = prof.Add<Vignette>(true); vig.intensity.Override(.22f); vig.smoothness.Override(.45f); vig.color.Override(Color.black);
             var fg = prof.Add<FilmGrain>(true); fg.type.Override(FilmGrainLookup.Thin1); fg.intensity.Override(.18f);
             var smh = prof.Add<ShadowsMidtonesHighlights>(true); smh.shadows.Override(new Vector4(.98f, 1f, 1.04f, 0)); smh.highlights.Override(new Vector4(1.03f, 1f, .96f, 0));
             // camera & pipeline quality
-            var cd = cam.GetUniversalAdditionalCameraData(); cd.renderPostProcessing = true; cd.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing; cd.antialiasingQuality = AntialiasingQuality.High;
-            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp) { if (urp.shadowDistance < 200) urp.shadowDistance = 220; urp.shadowCascadeCount = 4; }
-            sun.shadows = LightShadows.Soft; sun.shadowStrength = .82f; sun.shadowBias = .05f; sun.shadowNormalBias = .4f;
+            var cd = cam.GetUniversalAdditionalCameraData(); cd.renderPostProcessing = true;
+            sun.shadowStrength = .82f; sun.shadowBias = .05f; sun.shadowNormalBias = .4f;
+            SetQuality(1);
             MakeClouds(); MakeRain(); MakeGrassMesh();
+        }
+
+        /// Graphics preset (settings screen): 0 low, 1 medium (default), 2 high. Shadow reach and softness, cascade count, SMAA and how far grass is drawn.
+        /// The old fixed setting was the HIGH preset on every machine (220 m soft shadows in four cascades, SMAA high, all 30 000 grass tufts every frame).
+        static UniversalRenderPipelineAsset urpOrig; static float origShadow; static int origCascades;
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)] static void ResetStatics() { urpOrig = null; }
+        static void RestoreUrp() { if (urpOrig) { urpOrig.shadowDistance = origShadow; urpOrig.shadowCascadeCount = origCascades; } urpOrig = null; Application.quitting -= RestoreUrp; }
+        public void SetQuality(int q)
+        {
+            q = Mathf.Clamp(q, 0, 2); var cd = cam.GetUniversalAdditionalCameraData();
+            cd.antialiasing = q == 0 ? AntialiasingMode.None : AntialiasingMode.SubpixelMorphologicalAntiAliasing; cd.antialiasingQuality = q == 2 ? AntialiasingQuality.High : AntialiasingQuality.Medium;
+            if (GraphicsSettings.currentRenderPipeline is UniversalRenderPipelineAsset urp)
+            {   // in the editor this is the project's own pipeline asset: remember its values and put them back when Play stops, so a preset never ends up saved to disk
+                if (urpOrig == null) { urpOrig = urp; origShadow = urp.shadowDistance; origCascades = urp.shadowCascadeCount; Application.quitting += RestoreUrp; }
+                urp.shadowDistance = q == 0 ? 80 : q == 1 ? 150 : 220; urp.shadowCascadeCount = q == 2 ? 4 : 2;
+            }
+            sun.shadows = q == 0 ? LightShadows.Hard : LightShadows.Soft;
+            grassDist = q == 0 ? 90 : q == 1 ? 140 : 200;
         }
 
         // ---------------- per mission ----------------
@@ -68,11 +87,37 @@ namespace FallWeiss
             if (skyMat) { skyMat.SetColor("_Top", tp); skyMat.SetColor("_Hor", hz); skyMat.SetColor("_SunC", sc * (1 - rainI * .8f)); skyMat.SetVector("_SunDir", d); }
             sun.transform.rotation = Quaternion.LookRotation(-d); sun.color = sc; sun.intensity = (.95f + dy * 1.6f) * (1 - rainI * .4f);
             RenderSettings.ambientSkyColor = Color.Lerp(tp, Color.white, .55f) * (1.05f + dy * .5f); RenderSettings.ambientEquatorColor = Color.Lerp(hz, Color.white, .25f) * (.95f + dy * .35f); RenderSettings.ambientGroundColor = FU.Hex(0x6a6248) * .75f;
-            RenderSettings.fogColor = hz; cam.backgroundColor = hz;
-            RenderSettings.fogStartDistance = fogNear * fk; RenderSettings.fogEndDistance = fogFar * (.55f + .45f * fk) * (1 - rainI * .35f);
+            // fog: tinted a little toward the zenith so it never reads as a bright wall in the sun's colour; never starts inside rifle range.
+            // Mokra's dawn (fogNear 102 x todFrom.fog .35) used to start at 36 m and bleach the whole battlefield beige.
+            var fc = Color.Lerp(hz, tp, .22f); RenderSettings.fogColor = fc; cam.backgroundColor = hz;
+            RenderSettings.fogStartDistance = Mathf.Max(80, fogNear * Mathf.Max(fk, .6f)); RenderSettings.fogEndDistance = Mathf.Max(520, fogFar * (.6f + .4f * fk) * (1 - rainI * .35f));
         }
         public void RtsFog(bool rts) { if (rts) { RenderSettings.fogStartDistance *= 3; RenderSettings.fogEndDistance *= 3; } }
 
+        public string VolumeInfo()
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var v in Object.FindObjectsByType<Volume>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                sb.Append($"[{v.gameObject.name} global={v.isGlobal} prio={v.priority} weight={v.weight} enabled={v.enabled} mine={(v == vol)} profile={(v.profile ? v.profile.name : "null")}: ");
+                if (v.profile) foreach (var c in v.profile.components) sb.Append(c.GetType().Name + (c.active ? "" : "(off)") + " ");
+                sb.Append("] ");
+            }
+            var cd = cam.GetUniversalAdditionalCameraData(); sb.Append($" camPost={cd.renderPostProcessing} aa={cd.antialiasing} layer={cd.volumeLayerMask.value}");
+            return sb.ToString();
+        }
+        public string OtherVolumesOff() { int n = 0; foreach (var v in Object.FindObjectsByType<Volume>(FindObjectsInactive.Include, FindObjectsSortMode.None)) if (v != vol) { v.enabled = false; n++; } return n + " other volumes disabled"; }
+        public string FxOff(string which)
+        {
+            foreach (var c in vol.profile.components) if (c.GetType().Name.ToLowerInvariant().StartsWith(which.ToLowerInvariant()) && which.Length > 0) { c.active = false; return c.GetType().Name + " off"; }
+            return "no such override: " + which;
+        }
+        public void PostOff() { Post(false); }
+        /// Post stack on for first person; off for the command map / deployment (cleaner planning view, and it sidesteps a glow the top-down camera picks up at the map edge — see roadmap T16).
+        public void Post(bool on) { var cd = cam.GetUniversalAdditionalCameraData(); cd.renderPostProcessing = on; }
+        public void BloomOff() { if (bloom != null) bloom.active = false; }
+        public string CloudInfo() { int on = 0; float y = 0; foreach (var c in clouds) { if (c.GetComponent<Renderer>().enabled) on++; y = c.position.y; } return on + "/" + clouds.Count + " y=" + y.ToString("0"); }
+        public void CloudsOff() { foreach (var c in clouds) c.GetComponent<Renderer>().enabled = false; }
         public void Suppression(float s) { if (vig != null) { vig.intensity.Override(.22f + s * .38f); } }
 
         public void Update(float dt, float gameT, bool showRain)
@@ -80,13 +125,25 @@ namespace FallWeiss
             // clouds drift and wrap around the camera
             var cp = cam.transform.position;
             foreach (var c in clouds) { var p = c.position + new Vector3(2.2f, 0, .8f) * dt; if (p.x - cp.x > 700) p.x -= 1400; if (p.z - cp.z > 700) p.z -= 1400; if (p.x - cp.x < -700) p.x += 1400; if (p.z - cp.z < -700) p.z += 1400; c.position = p; }
+            // clouds thin out as the camera climbs (command map / deployment): from the ground they are sky, from 150 m up they were a wall
+            float ck = Mathf.Clamp01(1 - (cp.y - 60) / 90); cloudMpb ??= new MaterialPropertyBlock(); cloudMpb.SetColor("_Color", new Color(1, 1, 1, (M != null && M.city ? .75f : .8f) * ck));
+            foreach (var c in clouds) { var r = c.GetComponent<Renderer>(); r.enabled = ck > .02f; if (r.enabled) r.SetPropertyBlock(cloudMpb); }
             // rain (port of rainIntensity / updateRain)
             float ri = 0;
             if (M != null && M.hasRain) { float ph = gameT / (M.time * .85f); if (ph > M.rainStart && ph < M.rainEnd) ri = Mathf.Sin(Mathf.PI * (ph - M.rainStart) / (M.rainEnd - M.rainStart)) * M.rainPeak; }
             rainI = ri;
             var em = rain.emission; em.rateOverTime = showRain ? 9000 * ri : 0; rain.transform.position = cp + Vector3.up * 22;
             // grass
-            if (grassMats != null) for (int i = 0; i < grass.Count; i++) Graphics.RenderMeshInstanced(grassRP[i % grassRP.Length], grassMesh, 0, grass[i]);
+            // only the 80 m cells within grassDist of the camera are drawn (the whole map used to be submitted every frame, most of it behind the fog)
+            if (grassMats != null && grass.Count > 0)
+            {
+                int cx = Mathf.FloorToInt(cp.x / GrassCell), cz = Mathf.FloorToInt(cp.z / GrassCell), n = Mathf.CeilToInt(grassDist / GrassCell), k = 0; float lim = (grassDist + GrassCell * .71f) * (grassDist + GrassCell * .71f);
+                for (int ix = cx - n; ix <= cx + n; ix++) for (int iz = cz - n; iz <= cz + n; iz++)
+                {
+                    float dx = (ix + .5f) * GrassCell - cp.x, dz = (iz + .5f) * GrassCell - cp.z; if (dx * dx + dz * dz > lim) continue;
+                    if (grass.TryGetValue((ix, iz), out var batches)) { k = (ix * 7 + iz * 13) & 0x7fff; foreach (var b in batches) Graphics.RenderMeshInstanced(grassRP[k++ % grassRP.Length], grassMesh, 0, b); }   // colour fixed per cell, so it does not flicker as the camera crosses cells
+                }
+            }
         }
 
         // ---------------- clouds ----------------
@@ -106,7 +163,7 @@ namespace FallWeiss
             for (int i = 0; i < 9; i++)
             {
                 var q = GameObject.CreatePrimitive(PrimitiveType.Quad); Object.Destroy(q.GetComponent<Collider>()); q.transform.SetParent(cloudRoot);
-                q.transform.position = new Vector3((float)rr.NextDouble() * 1400 - 700, 230 + (float)rr.NextDouble() * 80, (float)rr.NextDouble() * 1400 - 700);
+                q.transform.position = new Vector3((float)rr.NextDouble() * 1400 - 700, 380 + (float)rr.NextDouble() * 120, (float)rr.NextDouble() * 1400 - 700);   // was 230–310 m: the command-map camera (150 m up) sat right under a 500 m quad and saw a white sheet
                 q.transform.rotation = Quaternion.Euler(90, (float)rr.NextDouble() * 360, 0); float s = 380 + (float)rr.NextDouble() * 260; q.transform.localScale = new Vector3(s, s, 1);
                 var r = q.GetComponent<Renderer>(); r.shadowCastingMode = ShadowCastingMode.Off; r.receiveShadows = false; clouds.Add(q.transform);
             }
@@ -152,7 +209,10 @@ namespace FallWeiss
                 float s = .6f + (float)rnd.NextDouble() * .6f;
                 list.Add(Matrix4x4.TRS(new Vector3(x, World.H(x, z) - .03f, z), Quaternion.Euler(0, (float)rnd.NextDouble() * 360, 0), new Vector3(s, s * (.8f + (float)rnd.NextDouble() * .6f), s)));
             }
-            for (int i = 0; i < list.Count; i += 1023) grass.Add(list.GetRange(i, Mathf.Min(1023, list.Count - i)).ToArray());
+            // bucket by 80 m cell so Update can cull by distance
+            var cells = new Dictionary<(int, int), List<Matrix4x4>>();
+            foreach (var m in list) { var p = m.GetPosition(); var key = (Mathf.FloorToInt(p.x / GrassCell), Mathf.FloorToInt(p.z / GrassCell)); if (!cells.TryGetValue(key, out var l)) cells[key] = l = new List<Matrix4x4>(); l.Add(m); }
+            foreach (var kv in cells) { var bl = new List<Matrix4x4[]>(); for (int i = 0; i < kv.Value.Count; i += 1023) bl.Add(kv.Value.GetRange(i, Mathf.Min(1023, kv.Value.Count - i)).ToArray()); grass[kv.Key] = bl; }
         }
 
         // ---------------- unit icons (port of iconMat canvas drawing) ----------------

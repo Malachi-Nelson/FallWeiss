@@ -13,6 +13,10 @@ namespace FallWeissEditor
         static readonly string Path = System.IO.Path.Combine(Directory.GetCurrentDirectory(), "Logs", "fallweiss_compile.txt");
         static FallWeissCompileLog()
         {
+            // Game's Fx / SoundBank / Visuals fields are not serializable, so a hot reload mid-Play leaves them with a null camera and the
+            // console fills with NullReferenceExceptions from Visuals.Update. Stop Play mode before recompiling instead (Preferences >
+            // General > Script Changes While Playing = Stop Playing And Recompile).
+            if (EditorPrefs.GetInt("ScriptCompilationDuringPlay", 0) != 2) EditorPrefs.SetInt("ScriptCompilationDuringPlay", 2);
             CompilationPipeline.compilationStarted += _ => { try { File.WriteAllText(Path, "compile started " + System.DateTime.Now + "\n"); } catch { } };
             CompilationPipeline.assemblyCompilationFinished += (asm, msgs) =>
             {

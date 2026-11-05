@@ -17,7 +17,8 @@ namespace FallWeiss
     [Serializable] public class FSeg { public string k; public float x1, z1, x2, z2; }
     [Serializable] public class FProp { public string k; public float x, z, a, b; }
     [Serializable] public class FDecor { public string k; public float[] v; }
-    [Serializable] public class FPoint { public string n; public float x, z, r; public bool inside; }
+    [Serializable] public class FStream { public float[] pts; public float w, depth; }   // a brook / ditch, first point upstream
+    [Serializable] public class FPoint { public string n; public float x, z, r; public bool inside; public float w, d, rot; public string key; }   // w,d>0: rectangular zone (rot radians); key: hill / bridgehead / building / area
     [Serializable] public class FXZ { public float x, z; }
     [Serializable] public class FForce { public string type; public int n; public int loc; public float sp; }
     [Serializable] public class FComp { public string type; public int n; }
@@ -32,7 +33,7 @@ namespace FallWeiss
         public float time, half, vis, relief;
         public string ground;
         public bool city; public bool range;   // range = the weapons Test Range (no objectives / waves / AI director)
-        public int fortified;   // version of the RO2 objective fortification pass applied (Fall Weiss / Fortify Objectives)
+        public int fortified; public float north; public FStream[] streams; public int ponds;   // ponds: 0 = place natural ponds automatically, -1 = none   // north: real compass bearing of the map's +z axis, so the HUD compass matches the historical ground   // version of the RO2 objective fortification pass applied (Fall Weiss / Fortify Objectives)
         public FDecor[] decor;
         public bool hasSea; public float seaHx, seaHz;
         public bool hasRiver; public float rz0, ramp, rk, rw, rlevel; public float[] bridges;
@@ -49,6 +50,7 @@ namespace FallWeiss
         public FPoint[] points;
         public FXZ[] spawn;
         public FForce[] forces0, forces1;
+        public float[] deploy0, deploy1;   // optional pre-game deployment zone per side: x0, z0, x1, z1 (Game.DeployZone derives one when absent)
         public FWave[] waves;
         public int wrecks, fires;
         public bool hasShip; public float shipX, shipZ;
@@ -68,6 +70,8 @@ namespace FallWeiss
         public float hp, speed, range, sight, dmg, rof, acc, r, my = 1.4f, ty = 1f, bh = 2.3f, splash, pause, mgdmg;
         public int burst;
         public bool armor, mg, pen, fireOnMove;
+        // RO2-style armour: plate thickness (mm) front / side / rear, and the gun's penetration (mm of vertical plate at 100 m, mm lost per further 100 m)
+        public float armF, armS, armR, pen100, penDrop; public string gun;
         public UnitDef Clone() => (UnitDef)MemberwiseClone();
     }
 
@@ -75,7 +79,8 @@ namespace FallWeiss
     {
         public string id, name, vm, snd = "rifle";
         public int clip, reserve;
-        public float reload, rof, dmg, spread, ads = 40, recoil = .5f, range, reach;
+        public float reload, rof, dmg, spread, ads = 40, recoil = .5f, range, reach;   // range: how far the round is traced before it is dropped (not effective range — falloff handles that); 0 = Game default of 800 m
+        public float climb = -1, wobble = -1;   // per-round muzzle climb / side wander (radians) for the player; -1 = class default (auto .005/.003, semi .024/.0025)
         public bool auto, melee, scope, mg;
         public float fallNear = 160, fallFar = 340, fallMul = .8f;
     }
@@ -87,11 +92,11 @@ namespace FallWeiss
     {
         public static readonly Dictionary<string, UnitDef> BASE = new Dictionary<string, UnitDef>
         {
-            ["rifle"] = new UnitDef { kind = "inf", hp = 100, speed = 5.3f, range = 75, sight = 115, dmg = 55, rof = 3.1f, acc = .46f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
-            ["mg"] = new UnitDef { kind = "inf", hp = 100, speed = 4f, range = 100, sight = 120, dmg = 15, rof = .12f, burst = 5, pause = 2.6f, acc = .34f, r = .55f, my = 1f, ty = 1f, mg = true, bh = 2.3f },
-            ["at"] = new UnitDef { kind = "gun", hp = 60, speed = 2.2f, range = 110, sight = 120, dmg = 62, rof = 3.4f, acc = .85f, r = 1.1f, my = 1f, ty = .8f, pen = true, splash = 2, bh = 2.2f },
-            ["tank"] = new UnitDef { kind = "tank", hp = 420, speed = 7f, range = 110, sight = 125, dmg = 36, rof = 3.6f, acc = .8f, r = 1.8f, armor = true, my = 2f, ty = 1.1f, pen = true, splash = 4.6f, fireOnMove = true, mgdmg = 52, bh = 3.4f },
-            ["sniper"] = new UnitDef { kind = "inf", hp = 100, speed = 4.8f, range = 190, sight = 210, dmg = 100, rof = 4.6f, acc = .85f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
+            ["rifle"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 75, sight = 115, dmg = 55, rof = 3.1f, acc = .46f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
+            ["mg"] = new UnitDef { kind = "inf", hp = 100, speed = 3.0f, range = 100, sight = 120, dmg = 15, rof = .12f, burst = 5, pause = 2.6f, acc = .34f, r = .55f, my = 1f, ty = 1f, mg = true, bh = 2.3f },
+            ["at"] = new UnitDef { kind = "gun", hp = 60, speed = 2.2f, range = 140, sight = 150, dmg = 62, rof = 3.4f, acc = .85f, r = 1.1f, my = 1f, ty = .8f, pen = true, splash = 2, bh = 2.2f },
+            ["tank"] = new UnitDef { kind = "tank", hp = 420, speed = 7f, range = 140, sight = 150, dmg = 70, rof = 2.6f, acc = .85f, r = 1.8f, armor = true, my = 2f, ty = 1.1f, pen = true, splash = 4.5f, fireOnMove = true, mgdmg = 100, bh = 3.4f },   // tanks are the kings of the 1939 battlefield: grenades do nothing to them, only guns and shells kill them. HE splash was 6.5 m: telemetry had four Pz IIs killing 44 of 60 Polish dead in 2.5 min, so it is back to realistic 2 cm / 37 mm bursts (3 / 4.5 m)
+            ["sniper"] = new UnitDef { kind = "inf", hp = 100, speed = 3.4f, range = 190, sight = 210, dmg = 100, rof = 4.6f, acc = .85f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
             ["cav"] = new UnitDef { kind = "cav", hp = 100, speed = 10, range = 55, sight = 100, dmg = 50, rof = 3.2f, acc = .5f, r = .9f, my = 2.2f, ty = 1.3f, bh = 3.6f },
         };
 
@@ -101,9 +106,10 @@ namespace FallWeiss
             string k = team + type;
             if (cache.TryGetValue(k, out var d)) return d;
             d = BASE[type].Clone(); d.type = type;
-            if (team == 0 && type == "tank") d.hp = 440;
-            if (team == 1 && type == "tank") { d.hp = 320; d.dmg = 38; d.speed = 6.4f; }
-            if (team == 1 && type == "at") d.acc = .9f;
+            if (team == 0 && type == "tank") { d.hp = 520; d.rof = 1.7f; d.dmg = 55; d.splash = 3f; d.armF = 14.5f; d.armS = 14.5f; d.armR = 10; d.pen100 = 23; d.penDrop = 3; d.gun = "2 cm KwK 30"; }      // Panzer II Ausf. C (1939): 14.5 mm all round, 2 cm PzGr ~20 mm at 100 m, 14 at 500
+            if (team == 1 && type == "tank") { d.hp = 420; d.dmg = 72; d.splash = 4.5f; d.rof = 3.2f; d.speed = 6.4f; d.armF = 17; d.armS = 13; d.armR = 9; d.pen100 = 45; d.penDrop = 4; d.gun = "37 mm wz.37"; }   // 7TP: 17 mm front, 13 side; Bofors 37 mm punched any German tank of 1939
+            if (team == 0 && type == "at") { d.pen100 = 38; d.penDrop = 2; d.gun = "3.7 cm PaK 36"; }   // PzGr 39: ~35 mm at 100 m, 29 at 500
+            if (team == 1 && type == "at") { d.acc = .9f; d.pen100 = 45; d.penDrop = 4; d.gun = "37 mm Bofors wz.36"; }
             cache[k] = d; return d;
         }
 
@@ -116,17 +122,17 @@ namespace FallWeiss
 
         public static readonly Dictionary<string, WeaponDef> WEAPONS = new Dictionary<string, WeaponDef>
         {
-            ["kar98k"] = new WeaponDef { name = "Karabiner 98k", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.05f, dmg = 80, spread = .0011f, ads = 40, recoil = .7f, fallMul = 1 },
-            ["wz29"] = new WeaponDef { name = "Karabin wz.29 Mauser", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.05f, dmg = 80, spread = .0012f, ads = 40, recoil = .7f, fallMul = 1 },
-            ["mp38"] = new WeaponDef { name = "MP 38", vm = "smg", clip = 32, reserve = 128, reload = 2.2f, rof = .105f, dmg = 42, spread = .0065f, auto = true, ads = 52, snd = "mg", recoil = .2f, range = 90, fallNear = 18, fallFar = 75, fallMul = .45f },
-            ["bar28"] = new WeaponDef { name = "Rkm wz.28 (BAR)", vm = "bar", clip = 20, reserve = 100, reload = 2.7f, rof = .1f, dmg = 52, spread = .0045f, auto = true, ads = 46, snd = "mg", recoil = .3f, range = 140, fallNear = 55, fallFar = 150, fallMul = .7f },
-            ["mg34"] = new WeaponDef { name = "MG 34", vm = "mg", clip = 75, reserve = 225, reload = 4.6f, rof = .07f, dmg = 52, spread = .0055f, auto = true, ads = 48, snd = "mg", recoil = .17f, mg = true },
-            ["ckm30"] = new WeaponDef { name = "Ckm wz.30", vm = "mg", clip = 60, reserve = 240, reload = 4.2f, rof = .085f, dmg = 52, spread = .0055f, auto = true, ads = 48, snd = "mg", recoil = .17f, mg = true },
-            ["p38"] = new WeaponDef { name = "Walther P38", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 45, spread = .005f, ads = 58, recoil = .3f, range = 70, fallNear = 20, fallFar = 60, fallMul = .6f },
-            ["vis"] = new WeaponDef { name = "Vis wz.35", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 45, spread = .005f, ads = 58, recoil = .3f, range = 70, fallNear = 20, fallFar = 60, fallMul = .6f },
-            ["p08"] = new WeaponDef { name = "Luger P08", vm = "pistol", clip = 8, reserve = 24, reload = 2.1f, rof = .28f, dmg = 45, spread = .0048f, ads = 58, recoil = .32f, range = 70, fallNear = 20, fallFar = 60, fallMul = .6f },
-            ["kar98kz"] = new WeaponDef { name = "Kar98k ZF39 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 100, spread = .0004f, ads = 9, scope = true, recoil = .8f, range = 420, fallNear = 999, fallFar = 1000, fallMul = 1 },
-            ["wz29z"] = new WeaponDef { name = "Mauser wz.29 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 100, spread = .0004f, ads = 9, scope = true, recoil = .8f, range = 420, fallNear = 999, fallFar = 1000, fallMul = 1 },
+            ["kar98k"] = new WeaponDef { name = "Karabiner 98k", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.1f, dmg = 100, spread = .0005f, ads = 40, recoil = .7f, range = 800, fallMul = 1, snd = "k98" },
+            ["wz29"] = new WeaponDef { name = "Karabin wz.29 Mauser", vm = "rifle", clip = 5, reserve = 40, reload = 2.3f, rof = 1.1f, dmg = 100, spread = .00055f, ads = 40, recoil = .7f, range = 800, fallMul = 1, snd = "k98" },
+            ["mp38"] = new WeaponDef { name = "MP 38", vm = "smg", clip = 32, reserve = 128, reload = 2.2f, rof = .12f, dmg = 45, spread = .0065f, auto = true, ads = 46, recoil = .11f, climb = .0022f, wobble = .0016f, range = 400, fallNear = 60, fallFar = 200, fallMul = .7f, snd = "mp40" },   // RO2-style: a heavy, slow (500 rpm) 9 mm gun that barely climbs
+            ["bar28"] = new WeaponDef { name = "Rkm wz.28 (BAR)", vm = "bar", clip = 20, reserve = 100, reload = 2.7f, rof = .1f, dmg = 100, spread = .0022f, auto = true, ads = 45, recoil = .3f, range = 900, fallNear = 300, fallFar = 700, fallMul = .9f, snd = "bar" },
+            ["mg34"] = new WeaponDef { name = "MG 34", vm = "mg", clip = 75, reserve = 225, reload = 4.6f, rof = .075f, dmg = 100, spread = .0026f, auto = true, ads = 46, recoil = .17f, mg = true, range = 1000, snd = "mg42" },
+            ["ckm30"] = new WeaponDef { name = "Ckm wz.30", vm = "ckm", clip = 100, reserve = 300, reload = 4.2f, rof = .1f, dmg = 100, spread = .0026f, auto = true, ads = 46, recoil = .17f, mg = true, range = 1000, snd = "browning" },
+            ["p38"] = new WeaponDef { name = "Walther P38", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 42, spread = .005f, ads = 60, recoil = .3f, range = 200, fallNear = 30, fallFar = 120, fallMul = .7f, snd = "p38" },
+            ["vis"] = new WeaponDef { name = "Vis wz.35", vm = "pistol", clip = 8, reserve = 24, reload = 2f, rof = .3f, dmg = 42, spread = .005f, ads = 60, recoil = .3f, range = 200, fallNear = 30, fallFar = 120, fallMul = .7f, snd = "pistol" },
+            ["p08"] = new WeaponDef { name = "Luger P08", vm = "pistol", clip = 8, reserve = 24, reload = 2.1f, rof = .28f, dmg = 42, spread = .0048f, ads = 60, recoil = .32f, range = 200, fallNear = 30, fallFar = 120, fallMul = .7f, snd = "pistol" },
+            ["kar98kz"] = new WeaponDef { name = "Kar98k ZF39 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 110, spread = .00025f, ads = 9, scope = true, recoil = .8f, range = 1000, fallNear = 999, fallFar = 1000, fallMul = 1, snd = "k98" },
+            ["wz29z"] = new WeaponDef { name = "Mauser wz.29 (scoped)", vm = "sniper", clip = 5, reserve = 30, reload = 2.6f, rof = 1.5f, dmg = 110, spread = .00025f, ads = 9, scope = true, recoil = .8f, range = 1000, fallNear = 999, fallFar = 1000, fallMul = 1, snd = "k98" },
             ["bayonet"] = new WeaponDef { name = "Bayonet", vm = "knife", melee = true, rof = .75f, dmg = 90, reach = 2.8f },
             ["sabre"] = new WeaponDef { name = "Szabla wz.34", vm = "sabre", melee = true, rof = .85f, dmg = 100, reach = 3.5f },
             // crew weapons (player driving a gun / tank)
@@ -142,10 +148,10 @@ namespace FallWeiss
         {
             switch (type)
             {
-                case "rifle": return team == 0 ? new[] { "kar98k", "p38", "bayonet" } : new[] { "wz29", "vis", "bayonet" };
-                case "mg": return team == 0 ? new[] { "mg34", "p38" } : new[] { "ckm30", "vis" };
-                case "sniper": return team == 0 ? new[] { "kar98kz", "p38", "bayonet" } : new[] { "wz29z", "vis", "bayonet" };
-                case "cav": return new[] { "wz29", "sabre", "vis" };
+                case "rifle": return team == 0 ? new[] { "kar98k", "p08", "bayonet" } : new[] { "wz29", "vis", "bayonet" };
+                case "mg": return team == 0 ? new[] { "mg34", "p08" } : new[] { "ckm30", "vis" };
+                case "sniper": return team == 0 ? new[] { "kar98kz", "p08", "bayonet" } : new[] { "wz29z", "vis", "bayonet" };
+                case "cav": return team == 0 ? new[] { "kar98k", "sabre", "p08" } : new[] { "wz29", "sabre", "vis" };   // 1939: each side its own carbine and pistol
                 case "at": return new[] { "at_gun" };
                 case "tank": return new[] { "tank_gun" };
             }
@@ -154,11 +160,11 @@ namespace FallWeiss
 
         public static readonly ClassDef[] CLASSES =
         {
-            new ClassDef { key = "rifleman", label = "Rifleman", type = "rifle", gren = 2, weps = new[] { new[] { "kar98k", "p38", "bayonet" }, new[] { "wz29", "vis", "bayonet" } } },
-            new ClassDef { key = "assault", label = "Assault", type = "rifle", gren = 3, smoke = 1, weps = new[] { new[] { "mp38", "p38", "bayonet" }, new[] { "bar28", "vis", "bayonet" } } },
-            new ClassDef { key = "gunner", label = "Machine Gunner", type = "mg", gren = 1, weps = new[] { new[] { "mg34", "p38" }, new[] { "ckm30", "vis" } } },
+            new ClassDef { key = "rifleman", label = "Rifleman", type = "rifle", gren = 2, weps = new[] { new[] { "kar98k", "p08", "bayonet" }, new[] { "wz29", "vis", "bayonet" } } },
+            new ClassDef { key = "assault", label = "Assault", type = "rifle", gren = 3, smoke = 1, weps = new[] { new[] { "mp38", "p08", "bayonet" }, new[] { "bar28", "vis", "bayonet" } } },
+            new ClassDef { key = "gunner", label = "Machine Gunner", type = "mg", gren = 1, weps = new[] { new[] { "mg34", "p08" }, new[] { "ckm30", "vis" } } },
             new ClassDef { key = "officer", label = "Officer", type = "rifle", gren = 1, smoke = 2, weps = new[] { new[] { "mp38", "p08" }, new[] { "wz29", "vis" } } },
-            new ClassDef { key = "sniper", label = "Sniper", type = "sniper", gren = 1, weps = new[] { new[] { "kar98kz", "p38" }, new[] { "wz29z", "vis" } } },
+            new ClassDef { key = "sniper", label = "Sniper", type = "sniper", gren = 1, weps = new[] { new[] { "kar98kz", "p08" }, new[] { "wz29z", "vis" } } },
         };
 
         public static readonly BuyDef[] BUY =
@@ -171,7 +177,7 @@ namespace FallWeiss
             new BuyDef { key = "sniper", label = "Sniper", cost = 45, n = 1 },
         };
 
-        public static float SprintMul(string kind) => kind == "inf" ? 1.6f : kind == "cav" ? 1.25f : kind == "tank" ? 1.3f : 1.4f;
+        public static float SprintMul(string kind) => kind == "inf" ? 1.7f : kind == "cav" ? 1.25f : kind == "tank" ? 1.3f : 1.4f;   // RO2 pace (W9): infantry 3.6 m/s walk, ~6.1 m/s sprint (was 5.3 / 8.5)
     }
 
     // ---------------- helpers ----------------
@@ -222,7 +228,7 @@ namespace FallWeiss
 
         public static Material Lit(Color c, float smooth = .1f)
         {
-            int k = Key(c) ^ (smooth > .5f ? 0x40000000 : 0);
+            int k = Key(c) ^ ((int)(Mathf.Clamp01(smooth) * 7.99f) << 28);
             if (lit.TryGetValue(k, out var m) && m) return m;
             if (!litShader) litShader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
             m = new Material(litShader); m.SetColor("_BaseColor", c); m.color = c; m.SetFloat("_Smoothness", smooth);
