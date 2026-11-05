@@ -92,14 +92,16 @@ namespace FallWeiss
     {
         public static readonly Dictionary<string, UnitDef> BASE = new Dictionary<string, UnitDef>
         {
-            ["rifle"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 75, sight = 115, dmg = 55, rof = 3.1f, acc = .46f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
-            ["mg"] = new UnitDef { kind = "inf", hp = 100, speed = 3.0f, range = 100, sight = 120, dmg = 15, rof = .12f, burst = 5, pause = 2.6f, acc = .34f, r = .55f, my = 1f, ty = 1f, mg = true, bh = 2.3f },
+            // RO2 engagement ranges (5 Nov): a rifleman opens fire at 150 m, an MG at 220 (were 75 / 100 — men walked across open ground at
+            // 100 m without a shot). acc re-tuned so the hit chance at the old ranges is about what it was (.46 → .34 keeps ~.19 at 75 m; it is ~.11 at 150)
+            ["rifle"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 150, sight = 180, dmg = 55, rof = 3.1f, acc = .34f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
+            ["mg"] = new UnitDef { kind = "inf", hp = 100, speed = 3.0f, range = 220, sight = 240, dmg = 15, rof = .12f, burst = 5, pause = 2.6f, acc = .26f, r = .55f, my = 1f, ty = 1f, mg = true, bh = 2.3f },
             ["at"] = new UnitDef { kind = "gun", hp = 60, speed = 2.2f, range = 140, sight = 150, dmg = 62, rof = 3.4f, acc = .85f, r = 1.1f, my = 1f, ty = .8f, pen = true, splash = 2, bh = 2.2f },
             ["tank"] = new UnitDef { kind = "tank", hp = 420, speed = 7f, range = 140, sight = 150, dmg = 70, rof = 2.6f, acc = .85f, r = 1.8f, armor = true, my = 2f, ty = 1.1f, pen = true, splash = 4.5f, fireOnMove = true, mgdmg = 100, bh = 3.4f },   // tanks are the kings of the 1939 battlefield: grenades do nothing to them, only guns and shells kill them. HE splash was 6.5 m: telemetry had four Pz IIs killing 44 of 60 Polish dead in 2.5 min, so it is back to realistic 2 cm / 37 mm bursts (3 / 4.5 m)
             ["sniper"] = new UnitDef { kind = "inf", hp = 100, speed = 3.4f, range = 190, sight = 210, dmg = 100, rof = 4.6f, acc = .85f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
-            ["cav"] = new UnitDef { kind = "cav", hp = 100, speed = 10, range = 55, sight = 100, dmg = 50, rof = 3.2f, acc = .5f, r = .9f, my = 2.2f, ty = 1.3f, bh = 3.6f },
+            ["cav"] = new UnitDef { kind = "cav", hp = 100, speed = 10, range = 80, sight = 120, dmg = 50, rof = 3.2f, acc = .42f, r = .9f, my = 2.2f, ty = 1.3f, bh = 3.6f },
             // crews (T27): gun numbers carry the carbine, tank crews a pistol only — on foot they are the weakest men on the field
-            ["crew"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 70, sight = 110, dmg = 55, rof = 3.3f, acc = .4f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
+            ["crew"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 120, sight = 160, dmg = 55, rof = 3.3f, acc = .3f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
             ["tcrew"] = new UnitDef { kind = "inf", hp = 100, speed = 3.6f, range = 35, sight = 100, dmg = 42, rof = 1.1f, acc = .32f, r = .5f, my = 1.4f, ty = 1f, bh = 2.3f },
         };
 

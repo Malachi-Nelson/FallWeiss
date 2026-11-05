@@ -517,7 +517,22 @@ namespace FallWeiss
                 trees.Add(new Tree { x = x, z = z, s = .8f + R.Next() * .7f, k = R.Next() < .3f ? 1 : 0 });
             }
             foreach (var fo in m.forests) for (int i = 0; i < fo.n; i++) { float a = R.Next() * 6.28f, d = Mathf.Sqrt(R.Next()) * fo.r; AddT(fo.x + Mathf.Cos(a) * d, fo.z + Mathf.Sin(a) * d); }
-            int lone = Mathf.RoundToInt((m.city ? 30 : 60) * AreaK); for (int i = 0; i < lone; i++) AddT((R.Next() - .5f) * 2 * (Hh + 20), (R.Next() - .5f) * 2 * (Hh + 20));
+            int lone = Mathf.RoundToInt((m.city ? 30 : 100) * AreaK); for (int i = 0; i < lone; i++) AddT((R.Next() - .5f) * 2 * (Hh + 20), (R.Next() - .5f) * 2 * (Hh + 20));
+            if (!m.city)
+            {   // foliage pass (5 Nov): the Polish countryside is not a lawn — copses in the fields and tree-lined roads (every long road had its avenue)
+                int copses = Mathf.RoundToInt(9 * AreaK);
+                for (int i = 0; i < copses; i++) { float cx = (R.Next() - .5f) * 2 * (Hh - 30), cz = (R.Next() - .5f) * 2 * (Hh - 30); if (!ClearOfKey(cx, cz, 30) || NearRoad(cx, cz, 14)) continue; int n = 5 + (int)(R.Next() * 7); float cr = 6 + R.Next() * 7; for (int k = 0; k < n; k++) { float a = R.Next() * 6.28f, dd = Mathf.Sqrt(R.Next()) * cr; AddT(cx + Mathf.Cos(a) * dd, cz + Mathf.Sin(a) * dd); } }
+                foreach (var r in m.roads)
+                {
+                    float dx = r.x2 - r.x1, dz = r.z2 - r.z1, L = FU.Hyp(dx, dz); if (L < 90 || R.Next() < .35f) continue; dx /= L; dz /= L; float off = r.w / 2 + 5.5f; bool both = R.Next() < .5f;
+                    for (float s = 14 + R.Next() * 10; s < L - 14; s += 13 + R.Next() * 5)
+                    {
+                        if (R.Next() < .15f) continue;   // the odd gap where a tree has gone
+                        float px = r.x1 + dx * s, pz = r.z1 + dz * s;
+                        AddT(px - dz * off + FU.Rand(-.6f, .6f), pz + dx * off + FU.Rand(-.6f, .6f)); if (both) AddT(px + dz * off + FU.Rand(-.6f, .6f), pz - dx * off + FU.Rand(-.6f, .6f));
+                    }
+                }
+            }
             foreach (var o in m.orchards) for (float x = o.x - o.w / 2; x <= o.x + o.w / 2; x += 6) for (float z = o.z - o.d / 2; z <= o.z + o.d / 2; z += 6)
                     {
                         if (!ClearOfKey(x, z, 14) || NearRoad(x, z, 4) || InBuilding(x, z, 3) || InRiver(x, z, 4)) continue;

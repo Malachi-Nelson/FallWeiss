@@ -355,8 +355,14 @@ namespace FallWeiss
             }
             else
             {
-                for (int i = 0; i < 26 * AreaK; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z)) Add("bushes", x, z, rr(4, 9), Mathf.Round(rr(3, 7))); }
-                for (int i = 0; i < 14 * AreaK; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z) && Slope(x, -z) < .25f) Add("flowers", x, z, rr(5, 11), Mathf.Round(rr(25, 55))); }
+                for (int i = 0; i < 110 * AreaK; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z)) Add("bushes", x, z, rr(4, 11), Mathf.Round(rr(3, 9))); }   // was 26×: fields read as a lawn (foliage pass, 5 Nov)
+                foreach (var sg in M.segs)
+                    if ((sg.k == "fence" || sg.k == "hedge") && R.Next() < .6f)
+                    {   // scrub along the field boundaries: a fence line in Poland is never bare
+                        float sl = FU.Hyp(sg.x2 - sg.x1, sg.z2 - sg.z1); if (sl < 12) continue; int n = Mathf.Max(1, Mathf.RoundToInt(sl / 16));
+                        for (int k = 0; k < n; k++) { float t = (k + .5f + rr(-.3f, .3f)) / n, x = Mathf.Lerp(sg.x1, sg.x2, t), z = -Mathf.Lerp(sg.z1, sg.z2, t); if (ok(x, z)) Add("bushes", x + rr(-1.5f, 1.5f), z + rr(-1.5f, 1.5f), 2.5f, 3); }
+                    }
+                for (int i = 0; i < 30 * AreaK; i++) { float x = rr(-Hh, Hh), z = rr(-Hh, Hh); if (ok(x, z) && Slope(x, -z) < .25f) Add("flowers", x, z, rr(5, 11), Mathf.Round(rr(25, 55))); }
                 foreach (var p in roadPts(Mathf.RoundToInt(3 * Mathf.Sqrt(AreaK)), 3.5f)) Add("shrine", p.x, p.y);   // roadside kapliczki
                 var houses = new List<FBuild>(); foreach (var b in M.build) if (b.k == "house" || b.k == "barn" || b.k == "villa") houses.Add(b);
                 for (int i = houses.Count - 1; i > 0; i--) { int j = (int)(R.Next() * (i + 1)) % (i + 1); var tmp = houses[i]; houses[i] = houses[j]; houses[j] = tmp; }

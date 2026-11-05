@@ -42,6 +42,7 @@ namespace FallWeiss
         // first person state (port of fp)
         float yaw, pitch, ads, fov = 70, recoil, bob, eye = 1.55f, swT, fireQueued, gT, lean; Vector3 tpPivot;
         public float Ads => ads;
+        public readonly Dictionary<string, int> ffLog = new Dictionary<string, int>();   // friendly kills by cause (dbg losses)
         float sens = 1, baseFov = 72;   // options (PlayerPrefs FW.Sens / FW.Fov)
         float fpsAvg = 60, fpsMin = 60, fpsMinT;
         public int[,,] killLog = new int[2, 3, 4];   // who killed whom (dbg losses)
@@ -525,7 +526,7 @@ namespace FallWeiss
 
         void ClearAll()
         {
-            System.Array.Clear(killLog, 0, killLog.Length); playerZero.Clear(); zeroShowT = 0;
+            System.Array.Clear(killLog, 0, killLog.Length); ffLog.Clear(); playerZero.Clear(); zeroShowT = 0;
             AudioListener.pause = false; Time.timeScale = 1;   // Restart / Quit from the pause screen used to carry the paused listener into the next mission (silent until the next Esc-Esc)
             StopAllCoroutines(); spStage[0] = spStage[1] = -99; sgT.Clear();
             foreach (var u in units) if (u.go) Destroy(u.go); units.Clear(); player = lastPlayer = null; if (unitRoot) Destroy(unitRoot.gameObject);
@@ -2361,7 +2362,16 @@ namespace FallWeiss
                 case "smokeoff": World.farSmoke.Clear(); fx.Clear(); return "far smoke off";
                 case "postoff": vis.PostOff(); return "post off";
                 case "cloudsoff": vis.CloudsOff(); return "clouds off";
-                case "losses": { var sb = new System.Text.StringBuilder(); string[] by = { "enemy", "FRIENDLY", "none" }, wk = { "rifle", "tank", "gun", "mg/other" }; for (int tm = 0; tm < 2; tm++) { sb.Append($"T{tm} dead:"); for (int b = 0; b < 3; b++) for (int k = 0; k < 4; k++) if (killLog[tm, b, k] > 0) sb.Append($" {by[b]}/{wk[k]}={killLog[tm, b, k]}"); sb.Append(" | "); } return sb.ToString(); }
+                case "losses": { var sb = new System.Text.StringBuilder(); if (ffLog.Count > 0) { sb.Append("FF by cause:"); foreach (var kv in ffLog) sb.Append(" " + kv.Key + "=" + kv.Value); sb.Append(" | "); } string[] by = { "enemy", "FRIENDLY", "none" }, wk = { "rifle", "tank", "gun", "mg/other" }; for (int tm = 0; tm < 2; tm++) { sb.Append($"T{tm} dead:"); for (int b = 0; b < 3; b++) for (int k = 0; k < 4; k++) if (killLog[tm, b, k] > 0) sb.Append($" {by[b]}/{wk[k]}={killLog[tm, b, k]}"); sb.Append(" | "); } return sb.ToString(); }
+                case "ai":
+                    {   // AI telemetry (5 Nov): what the men near the player are doing — stance / moving / target / cover / orders — and a tally for the whole side
+                        var sb = new System.Text.StringBuilder(); int tm = w.Length > 1 ? int.Parse(w[1]) : ME; int n = 0, standing = 0, crouch = 0, prone = 0, hasT = 0, inHide = 0, mov = 0, los = 0, forcedN = 0, pin = 0;
+                        var near = units.Where(u => u.alive && u.team == tm && u.Foot && u != player && u.mount == null).OrderBy(u => player != null ? FU.Hyp(u.x - player.x, u.z - player.z) : 0).ToList();
+                        foreach (var u in near) { n++; if (u.stance == 0) standing++; else if (u.stance == 1) crouch++; else prone++; if (u.target != null) hasT++; if (u.hide != null) inHide++; if (u.moving) mov++; if (u.los) los++; if (u.order != null && u.order.force) forcedN++; if (u.Pinned) pin++; }
+                        sb.Append($"team {tm}: n={n} stand={standing} crouch={crouch} prone={prone} target={hasT} los={los} hide={inHide} moving={mov} forcedOrder={forcedN} pinned={pin}\n");
+                        foreach (var u in near.Take(8)) { float dT = u.target != null ? FU.Hyp(u.x - u.target.x, u.z - u.target.z) : -1; sb.Append($"  {u.type}#{u.id} st={u.stance} mov={(u.moving ? 1 : 0)} spr={(u.sprinting ? 1 : 0)} tgt={(u.target != null ? u.target.type + "@" + dT.ToString("0") : "-")} los={(u.los ? 1 : 0)} hide={(u.hide != null ? (u.hide.low ? "low" : u.hide.trench ? "trench" : "cover") + (u.hide.fire ? "" : "/nofire") : "-")} ord={(u.order != null ? (u.order.force ? "F" : "o") : "-")} supp={u.supp:0.00} cd={u.cd:0.0} shot={Time.time - u.lastShot:0.0}s ago\n"); }
+                        return sb.ToString();
+                    }
                 case "inf":
                     {   // T10 diagnostics: are the soldiers' models actually there, enabled, with meshes, at finite transforms?
                         var sb = new System.Text.StringBuilder();
