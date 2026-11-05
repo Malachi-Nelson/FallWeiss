@@ -245,7 +245,12 @@ namespace FallWeiss
 
         public void Init()
         {
-            foreach (var k in KEYS) { var a = Resources.LoadAll<AudioClip>("Audio/" + k); if (a != null && a.Length > 0) real[k] = a; }
+            foreach (var k in KEYS)
+            {
+                var a = Resources.LoadAll<AudioClip>("Audio/" + k);
+                if (a != null && ONLY.TryGetValue(k, out var keep)) { var f = System.Array.FindAll(a, c => System.Array.IndexOf(keep, c.name) >= 0); if (f.Length > 0) a = f; }
+                if (a != null && a.Length > 0) real[k] = a;
+            }
             clips["rifle"] = Make("rifle", .35f, 900, 18, .9f);
             clips["mg"] = Make("mg", .18f, 1300, 30, .7f);
             clips["cannon"] = Make("cannon", .9f, 260, 6, 1f);
@@ -267,6 +272,10 @@ namespace FallWeiss
             }
             Debug.Log($"[FallWeiss] SoundBank: {real.Count} recorded sound sets ({string.Join(", ", real.Keys)})");
         }
+        /// Sound sets where only some recordings are usable. Field artillery ("rumble") had six: only rumble_00 is a clean distant gun
+        /// (sharp thump, 2/3 of its energy under 150 Hz, one event, smooth roll-off). 01 swells in over 0.3 s, 02 is a crackle of 7 hits,
+        /// 03 is near-broadband hiss, and 04 / 05 start mid-waveform at 60-68 % level (an audible click; 04 is mostly sub-bass wobble).
+        static readonly Dictionary<string, string[]> ONLY = new Dictionary<string, string[]> { ["rumble"] = new[] { "rumble_00" } };
         /// Generic keys (distant firefights ask for "mg") resolve to the recorded weapon instead of the old synthesised click.
         static readonly Dictionary<string, string> ALIAS = new Dictionary<string, string> { ["rifle"] = "k98", ["mg"] = "mg42", ["smg"] = "mp40" };
         AudioClip Pick(string k, out string used)

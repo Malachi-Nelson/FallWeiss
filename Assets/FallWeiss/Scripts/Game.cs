@@ -1152,7 +1152,12 @@ namespace FallWeiss
                 foreach (float lat in new[] { -7f, 7f }) SpawnPlane(team, x, z, dx, dz, lat, 90, true, 9);
                 var lead = planes[planes.Count - 2]; lead.snd = audio.Follow("siren", lead.t);   // the wail rides the lead Stuka's dive and is cut at bomb release
             }
-            else for (int k = 0; k < 14; k++) shells.Add(new Shell { at = t + 3 + k * .45f + FU.Rand(0, .3f), p = new Vector3(x + FU.Rand(-14, 14), 0, z + FU.Rand(-14, 14)), r = 6, dmg = 80, team = -1 });
+            else
+            {   // the battery firing behind the caller's own line is heard before the shells arrive (it used to be silent until impact)
+                float rear = team == M.attacker ? -1 : 1;
+                for (int g = 0; g < 4; g++) { float dl = g * .35f + FU.Rand(0, .2f); var gun = Far(rear, 250); gun.y += 2; StartCoroutine(Later(dl, () => FarSound("rumble", gun, .5f, GunPitch))); }
+                for (int k = 0; k < 14; k++) shells.Add(new Shell { at = t + 3 + k * .45f + FU.Rand(0, .3f), p = new Vector3(x + FU.Rand(-14, 14), 0, z + FU.Rand(-14, 14)), r = 6, dmg = 80, team = -1 });
+            }
         }
         void SpawnPlane(int team, float x, float z, float dx, float dz, float lat, float speed, bool strike, float life, float y = 0)
         {
@@ -1214,11 +1219,15 @@ namespace FallWeiss
             var a = M.spawn[M.attacker]; var d = M.spawn[1 - M.attacker]; var ax = new Vector2(d.x - a.x, d.z - a.z).normalized; var pr = new Vector2(-ax.y, ax.x);
             float r = M.half + FU.Rand(120, 380), x = ax.x * r * side + pr.x * FU.Rand(-spread, spread), z = ax.y * r * side + pr.y * FU.Rand(-spread, spread); return new Vector3(x, World.H(Mathf.Clamp(x, -M.half, M.half), Mathf.Clamp(z, -M.half, M.half)), z);
         }
-        void FarSound(string k, Vector3 src, float vol)
-        {   // distant sounds arrive late and quiet, from the right direction
+        void FarSound(string k, Vector3 src, float vol, float pitch = -1)
+        {   // distant sounds arrive late and quiet, from the right direction (Shot adds the last 60 m of travel itself)
             var l = cam.transform.position; var dir = (src - l); float dist = dir.magnitude; var at = l + dir.normalized * 60;
-            StartCoroutine(Later(Mathf.Min(3.5f, dist / 340f), () => audio.Shot(k, at, vol)));
+            StartCoroutine(Later(Mathf.Min(3.5f, Mathf.Max(0, dist - 60) / 343f), () => audio.Shot(k, at, vol, false, 0, pitch)));
         }
+        // Field artillery has one clean recording (see SoundBank.ONLY): the gun's report is played a little sharp and the shell's burst
+        // deeper and duller, so firing and landing no longer sound like the same event, and repeats don't sound copy-pasted.
+        static float GunPitch => FU.Rand(1.04f, 1.14f);
+        static float BurstPitch => FU.Rand(.8f, .92f);
         void Invasion(float dt)
         {
             if (range != null || World.points.Count == 0 || state == GState.Menu) return;
@@ -1226,8 +1235,8 @@ namespace FallWeiss
             if (horT <= 0)
             {   // German batteries firing from behind the attackers, and their shells bursting behind the Polish line
                 horT = FU.Rand(2.5f, 6.5f); var gun = Far(-1, 500); gun.y += 2;
-                fx.Puff(gun, new Color(1, .7f, .35f, 1), 6, 14, .25f, Vector3.zero, true); FarSound("rumble", gun, .55f);
-                var land = Far(1, 450); StartCoroutine(Later(FU.Rand(3, 6), () => { fx.Puff(land + Vector3.up * 3, new Color(1, .6f, .3f, 1), 8, 18, .3f, Vector3.zero, true); fx.Puff(land + Vector3.up * 8, new Color(.2f, .18f, .16f, .8f), 10, 26, 6, Vector3.up * 3); FarSound("rumble", land, .7f); }));
+                fx.Puff(gun, new Color(1, .7f, .35f, 1), 6, 14, .25f, Vector3.zero, true); FarSound("rumble", gun, .55f, GunPitch);
+                var land = Far(1, 450); StartCoroutine(Later(FU.Rand(3, 6), () => { fx.Puff(land + Vector3.up * 3, new Color(1, .6f, .3f, 1), 8, 18, .3f, Vector3.zero, true); fx.Puff(land + Vector3.up * 8, new Color(.2f, .18f, .16f, .8f), 10, 26, 6, Vector3.up * 3); FarSound("rumble", land, .7f, BurstPitch); }));
             }
             bomberT -= dt;
             if (bomberT <= 0)
