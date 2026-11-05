@@ -35,3 +35,8 @@ Thumbs.db
 *.unitypackage
 *.app
 crashlytics-build.properties
+
+# Game audio: Sonniss GDC licence forbids redistributing the raw files (repo is public).
+# Keep it locally in Assets/FallWeiss/Resources/Audio; see CREDITS.txt there.
+/Assets/FallWeiss/Resources/Audio/
+/Assets/FallWeiss/Resources/Audio.meta
