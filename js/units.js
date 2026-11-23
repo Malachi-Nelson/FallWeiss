@@ -50,7 +50,8 @@ export class Unit {
     if (this.kind === 'tank') { this.tdust = 0; }
     this.root.position.set(this.x, this.y, this.z); this.root.rotation.y = this.yaw;
   }
-  dispose() { this.g.scene.remove(this.root); if (this.engine) this.engine.stop(); }
+  dispose() { this.g.scene.remove(this.root); this.stopEngine(); }
+  stopEngine() { if (this.engine) { this.engine.stop(); this.engine = null; this.g.engines = Math.max(0, this.g.engines - 1); } }
 
   // ---------- hit volumes for real projectiles (player rounds, grenades): [x,y,z,r,part]
   spheres() {
@@ -89,10 +90,18 @@ export class Unit {
   }
   die(from, how) {
     if (!this.alive) return; this.alive = false; this.dead = 0.001; this.hp = 0; this.speed = 0; this.g.onDeath(this, from, how);
-    if (this.kind === 'tank') { this.g.fx.explosion(this.x, this.y + 1.5, this.z, 1.3, false); SND.explosion(this.x, this.y, this.z, 1.3); this.fire = this.g.fx.fire(this.x, this.y + 1.5, this.z, false); if (this.engine) { this.engine.stop(); this.engine = null; } this.model.traverse(o => { if (o.material) o.material = this.g.mats.burnt; }); if (this.n.turret) { this.n.turret.rotation.z = .3; this.n.turret.position.y += .25; } this.g.world.addObst(this.x - 1.3, this.x + 1.3, this.z - 2.4, this.z + 2.4, 2.2, 'wreck').y0 = this.y; }
-    else if (this.kind === 'gun') { this.g.fx.explosion(this.x, this.y + .6, this.z, .8, false); this.model.traverse(o => { if (o.material) o.material = this.g.mats.burnt; }); }
+    if (this.kind === 'tank') this.g.explodeFx(this.x, this.y + 1.5, this.z, 1.3, false); else if (this.kind === 'gun') this.g.explodeFx(this.x, this.y + .6, this.z, .8, false);
+    this.deathVisual();
+  }
+  /** what a death looks like: burnt-out hull and a wreck to drive round, or a man falling */
+  deathVisual() {
+    if (this.kind === 'tank') { this.fire = this.g.fx.fire(this.x, this.y + 1.5, this.z, false); this.stopEngine(); this.model.traverse(o => { if (o.material) o.material = this.g.mats.burnt; }); if (this.n.turret) { this.n.turret.rotation.z = .3; this.n.turret.position.y += .25; }
+      const w = this.g.world, o = w.addObst(this.x - 1.3, this.x + 1.3, this.z - 2.4, this.z + 2.4, 2.2, 'wreck'); o.y0 = this.y; o.y1 = this.y + 2.4; w.gridAdd(w.ogrid, o, 20); this.wreck = o; }
+    else if (this.kind === 'gun') this.model.traverse(o => { if (o.material) o.material = this.g.mats.burnt; });
     else { this.deathSide = Math.random() < .5 ? 1 : -1; this.deathRoll = (Math.random() - .5) * .8; if (this.kind === 'cav') this.deathSide = 1; }
   }
+  /** a mirrored unit (online client) dies because the host says so */
+  netDie(already) { if (!this.alive) return; this.alive = false; this.dead = already ? 30 : .001; this.hp = 0; this.speed = 0; this.deathVisual(); }
   dismount() { // uhlans fight on foot: the rider becomes a rifleman; the horse is led away
     if (this.kind !== 'cav' || !this.alive) return; const u = this.g.spawnUnit(this.team, 'rifle', this.x + Math.cos(this.yaw) * 1, this.z - Math.sin(this.yaw) * 1, { squad: this.squad, yaw: this.yaw });
     u.goal = this.goal; u.hp = this.hp; this.alive = false; this.g.fx.dust(this.x, this.y, this.z, 1.2); this.led = 1; this.g.removeUnit(this, true);
@@ -100,6 +109,7 @@ export class Unit {
 
   // ---------- per-frame
   update(dt) {
+    if (this.net) { this.netUpdate(dt); return; }
     if (!this.alive) { this.updateDead(dt); return; }
     if (this.bleed > 0) { this.bleed -= dt * .25; this.hp -= dt * 2.2; if (this.hp <= 0) { this.die(null, 'bled out'); return; } }
     this.supp = Math.max(0, this.supp - dt * (this.supp > .7 ? .12 : .2));
@@ -112,7 +122,26 @@ export class Unit {
     if (this.kind === 'inf' || this.kind === 'cav') { const t = Math.min(1, this.dead / .55); const lay = this.n.lay; if (lay) { lay.rotation.x = this.deathSide * Math.PI / 2 * (t * t); lay.rotation.z = this.deathRoll * t; lay.position.y = .12 * t; }
       if (this.kind === 'cav') this.root.rotation.z = t * 1.4;
       if (this.proxy && this.proxy.visible) this.proxy.rotation.x = this.deathSide * Math.PI / 2 * t; }
-    if (this.dead > (this.g.quality === 0 ? 45 : 90) && this.kind !== 'tank') this.g.removeUnit(this);
+    if (!this.net && this.dead > (this.g.quality === 0 ? 45 : 90) && this.kind !== 'tank') this.g.removeUnit(this);
+  }
+
+  /** follow the host's snapshots, drawn a moment in the past so movement is smooth between them */
+  netUpdate(dt) {
+    const b = this.nb;
+    if (this.alive && b && b.length) {
+      const t = performance.now() - (this.netDelay || 240); let i = b.length - 1; while (i > 0 && b[i - 1].t > t) i--;
+      const hi = b[i], lo = b[Math.max(0, i - 1)], f = hi.t > lo.t ? clamp((t - lo.t) / (hi.t - lo.t), 0, 1) : 1, ox = this.x, oz = this.z;
+      this.x = lerp(lo.x, hi.x, f); this.z = lerp(lo.z, hi.z, f); this.yaw = lo.yaw + angDiff(lo.yaw, hi.yaw) * f;
+      if (hi.ex !== undefined) { if (this.kind === 'tank' || this.kind === 'gun') this.turretYaw = lo.ex + angDiff(lo.ex, hi.ex) * f; else this.aimPitch = lerp(lo.ex, hi.ex, f); }
+      const s = f > .5 ? hi : lo; if (s.st !== undefined) this.stance = s.st; this.reloading = !!s.rl;
+      const sp = Math.hypot(this.x - ox, this.z - oz) / Math.max(dt, 1e-3); this.speed += (Math.min(sp, 14) - this.speed) * Math.min(1, dt * 6);
+      this.y = this.g.world.H(this.x, this.z);
+      // the footsteps, hooves, dust and engine noise the host's AI code would have made
+      if (this.kind === 'inf' && this.camD < 40 && this.speed > .5) { this.stepT = (this.stepT || 0) - dt * this.speed / 1.4; if (this.stepT <= 0) { this.stepT = 1; SND.footstep(this.x, this.y, this.z, this.g.world.surf(this.x, this.z), false, this.speed > 2.9); } }
+      if (this.kind === 'cav' && this.camD < 200 && this.speed > .5) { this.stepT = (this.stepT || 0) - dt * this.speed / 2; if (this.stepT <= 0) { this.stepT = 1; SND.footstep(this.x, this.y, this.z, 'grass', false, true); if (this.g.dry) this.g.fx.dust(this.x, this.y, this.z, .5); } }
+      if (this.kind === 'tank') this.tankFx(dt, this.speed);
+    }
+    if (!this.alive) this.updateDead(dt); else this.pose(dt);
   }
 
   // ---------- animation
@@ -123,7 +152,7 @@ export class Unit {
       const far = d > this.g.lodDist; if (this.proxy) { this.proxy.visible = far && !this.isPlayer; this.model.visible = !far && !this.isPlayer; }
       this.stanceV += (this.stance - this.stanceV) * Math.min(1, dt * 6); const s = this.stanceV;
       if (far) { this.proxy.rotation.x = s > 1.5 ? -Math.PI / 2 : 0; this.proxy.position.set(0, s > 1.5 ? .2 : 0, s > 1.5 ? .9 : 0); this.proxy.scale.y = s > .5 && s < 1.5 ? .72 : 1; return; }
-      const n = this.n; const mv = Math.min(1, this.speed / 3.6); this.phase += dt * (this.speed * 2.3 + (this.speed > 0 ? 1 : 0)); const sw = Math.sin(this.phase) * mv;
+      const n = this.n; const mv = Math.min(1, this.speed / 2.4); this.phase += dt * (this.speed * 2.6 + (this.speed > .05 ? 1.2 : 0)); const sw = Math.sin(this.phase) * mv;
       const crouch = clamp(s, 0, 1), prone = clamp(s - 1, 0, 1);
       if (n.hip) n.hip.position.y = .92 - crouch * .36 + Math.abs(Math.cos(this.phase)) * .04 * mv;
       if (n.leg0) { n.leg0.rotation.x = sw * .6 * (1 - prone) + crouch * (1.25) * (1 - prone); n.leg1.rotation.x = -sw * .6 * (1 - prone) + crouch * (-.15) * (1 - prone); }
@@ -132,7 +161,7 @@ export class Unit {
       if (n.upper) { n.upper.rotation.x = prone * 1.3 + (this.aimPitch || 0); n.upper.rotation.y = this.kind === 'inf' && prone < .5 ? sw * .08 : 0; }
       if (n.arm0) n.arm0.rotation.x = (this.reloading ? -.4 : 0);
     } else if (this.kind === 'cav') {
-      this.phase += dt * (2 + this.speed * 1.1); const gal = Math.min(1, this.speed / 6); const n = this.n;
+      this.phase += dt * (2 + this.speed * 1.3); const gal = Math.min(1, this.speed / 5); const n = this.n;
       for (let i = 0; i < 4; i++) { const leg = n['leg' + i]; if (leg) leg.rotation.x = Math.sin(this.phase + (i < 2 ? 0 : 1.6) + (i % 2) * .4) * .7 * gal; }
       this.model.position.y = Math.abs(Math.sin(this.phase)) * .12 * gal;
     } else if (this.kind === 'tank' || this.kind === 'gun') {
@@ -190,7 +219,7 @@ export class Unit {
     if (tx != null && !pinned) {
       const dx = tx - this.x, dz = tz - this.z, d = Math.hypot(dx, dz);
       if (d > .8) {
-        const want = Math.atan2(-dx, -dz); sp = D.speed * (this.stance === 2 ? .25 : this.stance === 1 ? .6 : 1) * (this.mode === 'charge' ? 1.6 : this.run ? 1.55 : 1) * (this.hp < 50 ? .7 : 1);
+        const want = Math.atan2(-dx, -dz); sp = D.speed * (this.stance === 2 ? .25 : this.stance === 1 ? .6 : 1) * (this.mode === 'charge' ? 1.6 : this.run ? 1.45 : 1) * (this.hp < 50 ? .7 : 1);
         if (this.stance === 2 && this.mode !== 'hold') { this.stance = 1; sp = D.speed * .6; }
         if (this.kind === 'cav') sp = D.speed * (this.run ? 1.2 : .8);
         if (!this.target || this.kind === 'cav' || this.mode === 'charge') this.yaw += angDiff(this.yaw, want) * Math.min(1, dt * 5);
@@ -201,7 +230,7 @@ export class Unit {
         const near = g.queryUnits(nx, nz, 1.6, u => u !== this && u.alive && u.kind !== 'tank'); for (const u of near) { const ex = nx - u.x, ez = nz - u.z, e = Math.hypot(ex, ez) || .01; if (e < 1.1) { nx += ex / e * (1.1 - e) * .5; nz += ez / e * (1.1 - e) * .5; } }
         const moved = Math.hypot(nx - this.x, nz - this.z); if (moved < step * .2) { this.stuck = (this.stuck || 0) + dt; if (this.stuck > 1.2) { this.stuck = 0; this.wpt = [this.x + (Math.random() - .5) * 10, this.z + (Math.random() - .5) * 10]; } } else this.stuck = 0;
         this.x = nx; this.z = nz; sp = moved / dt;
-        if (this.camD < 40 && this.speed > .5) { this.stepT = (this.stepT || 0) - dt * this.speed / 1.4; if (this.stepT <= 0) { this.stepT = 1; SND.footstep(this.x, this.y, this.z, g.world.surf(this.x, this.z), false, this.speed > 4); } }
+        if (this.camD < 40 && this.speed > .5) { this.stepT = (this.stepT || 0) - dt * this.speed / 1.4; if (this.stepT <= 0) { this.stepT = 1; SND.footstep(this.x, this.y, this.z, g.world.surf(this.x, this.z), false, this.speed > 2.9); } }
         if (this.kind === 'cav' && this.camD < 200) { this.stepT = (this.stepT || 0) - dt * this.speed / 2; if (this.stepT <= 0) { this.stepT = 1; SND.footstep(this.x, this.y, this.z, 'grass', false, true); if (g.dry) g.fx.dust(this.x, this.y, this.z, .5); } }
       } else this.wpt = null;
     }
@@ -222,31 +251,28 @@ export class Unit {
   }
   /** resolve an AI shot: hit chance from range, stance, cover, movement and suppression (RO2 numbers from FWCore) */
   shoot(t, d) {
-    const g = this.g, D = this.def; this.lastShotAt = g.time; const my = this.y + this.eye - .1;
+    const g = this.g, D = this.def; this.lastShotAt = g.time; const my = this.y + this.eye - .1, human = t.isPlayer || t.isRemote;
     const mz = this.n.muzzle ? this.n.muzzle.getWorldPosition(TMP) : TMP.set(this.x, my, this.z);
     const ex = t.x, ey = t.y + (t.isPlayer ? t.eyeH() * .8 : t.eye * .75), ez = t.z; let dx = ex - mz.x, dy = ey - mz.y, dz = ez - mz.z; const L = Math.hypot(dx, dy, dz); dx /= L; dy /= L; dz /= L;
-    SND.gunshot(D.snd === 'mg' ? (this.team === 0 ? 'mg34' : 'mg30') : 'rifle', mz.x, mz.y, mz.z);
-    if (this.camD < 250) g.fx.muzzle(mz.x, mz.y, mz.z, dx, dy, dz, this.type === 'mg' ? .8 : .6);
-    if (this.type === 'mg' && Math.random() < .35) g.fx.tracer(mz.x, mz.y, mz.z, dx, dy, dz, 700, 8, [1, .45, .2]);
+    const kind = D.snd === 'mg' ? (this.team === 0 ? 'mg34' : 'mg30') : 'rifle', tracer = this.type === 'mg' && Math.random() < .35;
     // hit probability
     let p = D.acc * Math.pow(clamp(75 / (d + 8), .08, 2.6), 1.05);
     const tst = t.stance ?? 0; p *= tst === 2 ? .45 : tst === 1 ? .75 : 1; p *= 1 - g.world.coverAt(t.x, t.z) * (tst ? .6 : .3);
-    p *= (t.speed > 3 ? .7 : 1) * (1 - this.supp * .6) * (this.stance === 2 ? 1.2 : this.stance === 1 ? 1.08 : .9) * (this.speed > .5 ? .5 : 1);
-    if (t.kind === 'cav') p *= 1.3; if (t.isPlayer) p *= g.playerHitMul;
-    if (t.kind === 'tank' || t.kind === 'gun') { g.fx.impact(t.x + (Math.random() - .5) * 2, t.y + 1 + Math.random(), t.z + (Math.random() - .5) * 2, 'metal'); SND.impact(t.x, t.y + 1, t.z, 'metal'); return; }
-    // the round's path: does it pass the player? (crack + suppression)
-    g.bulletNearPlayer(mz.x, mz.y, mz.z, dx, dy, dz, d + 30, this, true);
-    if (Math.random() < p) {
+    p *= (t.speed > 2.8 ? .7 : 1) * (1 - this.supp * .6) * (this.stance === 2 ? 1.2 : this.stance === 1 ? 1.08 : .9) * (this.speed > .5 ? .5 : 1);
+    if (t.kind === 'cav') p *= 1.3; if (human) p *= g.playerHitMul;
+    let ix = t.x, iy = t.y + 1, iz = t.z, mat = null;
+    if (t.kind === 'tank' || t.kind === 'gun') { ix = t.x + (Math.random() - .5) * 2; iy = t.y + 1 + Math.random(); iz = t.z + (Math.random() - .5) * 2; mat = 'metal'; }
+    else if (Math.random() < p) {
       // blocked by something in between? (wall the target ducks behind)
       const blk = g.world.rayBlock(mz.x, mz.y, mz.z, ex, ey, ez, { noTrees: false });
-      if (blk && blk.t < .97) { g.fx.impact(blk.x, blk.y, blk.z, blk.mat); SND.impact(blk.x, blk.y, blk.z, blk.mat); t.supp = Math.min(1, (t.supp || 0) + .25); return; }
-      const r = Math.random(), part = r < .12 ? 'head' : r < .5 ? 'chest' : r < .75 ? 'belly' : 'leg';
-      if (t.isPlayer) g.player.hurt(D.dmg * (part === 'head' ? 2 : part === 'leg' ? .45 : part === 'belly' ? .85 : 1.05), this, part); else t.hurt(D.dmg, this, part);
+      if (blk && blk.t < .97) { ix = blk.x; iy = blk.y; iz = blk.z; mat = blk.mat; if (!t.isRemote) t.supp = Math.min(1, (t.supp || 0) + .25); }
+      else { const r = Math.random(), part = r < .12 ? 'head' : r < .5 ? 'chest' : r < .75 ? 'belly' : 'leg'; mat = 'flesh'; iy = t.y + (t.stance === 2 ? .3 : 1.2);
+        if (human) g.hurtHuman(t, D.dmg * (part === 'head' ? 2 : part === 'leg' ? .45 : part === 'belly' ? .85 : 1.05), this, part); else t.hurt(D.dmg, this, part); }
     } else {
-      const ox = (Math.random() - .5) * (2 + d * .02), oz = (Math.random() - .5) * (2 + d * .02); const ix = t.x + ox, iz = t.z + oz, iy = g.world.H(ix, iz);
-      if (t.camD < 120) { g.fx.impact(ix, iy, iz, g.world.surf(ix, iz) === 'water' ? 'water' : 'dirt'); }
-      if (!t.isPlayer) t.supp = Math.min(1, (t.supp || 0) + (this.type === 'mg' ? .12 : .2));
+      ix = t.x + (Math.random() - .5) * (2 + d * .02); iz = t.z + (Math.random() - .5) * (2 + d * .02); iy = g.world.H(ix, iz); mat = g.world.surf(ix, iz) === 'water' ? 'water' : 'dirt';
+      if (!human) t.supp = Math.min(1, (t.supp || 0) + (this.type === 'mg' ? .12 : .2));
     }
+    g.shotFx(kind, mz.x, mz.y, mz.z, dx, dy, dz, d, tracer, this.type === 'mg' ? .8 : .6, ix, iy, iz, mat, this);
   }
 
   // ---------- tanks
@@ -270,15 +296,11 @@ export class Unit {
         let nx = this.x - Math.sin(this.yaw) * sp * dt, nz = this.z - Math.cos(this.yaw) * sp * dt;
         if (g.world.blocked(nx, nz, 1.6)) { nx = this.x; nz = this.z; sp = 0; this.stuck = (this.stuck || 0) + dt; if (this.stuck > 3) { this.yaw += 1.2; this.stuck = 0; } }
         // run over men in the way
-        for (const u of g.queryUnits(nx, nz, 2.2, u => u.alive && u.kind === 'inf' && u !== this)) { if (u.isPlayer) g.player.hurt(200, this, 'chest', 'crushed'); else u.hurt(500, this, 'chest', { how: 'crushed' }); }
+        for (const u of g.queryUnits(nx, nz, 2.2, u => u.alive && u.kind === 'inf' && u !== this)) { if (u.isPlayer || u.isRemote) g.hurtHuman(u, 200, this, 'chest', 'crushed'); else u.hurt(500, this, 'chest', { how: 'crushed' }); }
         this.x = nx; this.z = nz;
       } else this.wpt = null;
     }
-    this.speed = sp; this.y = g.world.H(this.x, this.z);
-    if (sp > 1 && g.dry && this.camD < 300) { this.tdust -= dt; if (this.tdust < 0) { this.tdust = .15; g.fx.dust(this.x + Math.sin(this.yaw) * 2.4, this.y, this.z + Math.cos(this.yaw) * 2.4, 1.2); } }
-    // engine audio for the nearest few tanks
-    if (this.camD < 450) { if (!this.engine && g.engines < 3) { this.engine = new SND.Engine(this.team === 1); g.engines++; } } else if (this.engine) { this.engine.stop(); this.engine = null; g.engines--; }
-    if (this.engine) this.engine.update(this.x, this.y + 1, this.z, sp, dt);
+    this.speed = sp; this.y = g.world.H(this.x, this.z); this.tankFx(dt, sp);
     // turret: hand-cranked traverse ~20°/s (compromise D-TUR)
     const t = this.target;
     if (t && t.alive) {
@@ -288,27 +310,33 @@ export class Unit {
       if (t.kind === 'inf' && d < 180 && Math.abs(err) < .15 && this.coaxT <= 0) { this.coaxBurst = (this.coaxBurst || 0) + 1; this.coaxT = this.coaxBurst % 8 === 0 ? 2 + Math.random() * 2 : .085; this.coax(t, d); }
     } else { this.turretYaw += angDiff(this.turretYaw, 0) * dt * .3; }
   }
+  /** dust behind the tracks and engine audio for the nearest few tanks */
+  tankFx(dt, sp) {
+    const g = this.g; if (!this.alive) return;
+    if (sp > 1 && g.dry && this.camD < 300) { this.tdust = (this.tdust || 0) - dt; if (this.tdust < 0) { this.tdust = .15; g.fx.dust(this.x + Math.sin(this.yaw) * 2.4, this.y, this.z + Math.cos(this.yaw) * 2.4, 1.2); } }
+    if (this.camD < 450) { if (!this.engine && g.engines < 3) { this.engine = new SND.Engine(this.team === 1); g.engines++; } } else this.stopEngine();
+    if (this.engine) this.engine.update(this.x, this.y + 1, this.z, sp, dt);
+  }
   tankAt(x, z) { for (const u of this.g.queryUnits(x, z, 5, u => u.kind === 'tank' && u !== this && u.alive)) return true; return false; }
   muzzleTank() { const a = this.yaw + this.turretYaw, L = this.kind === 'tank' ? 2.7 : 1.9, h = this.kind === 'tank' ? 1.75 : .95; return [this.x - Math.sin(a) * L, this.y + h, this.z - Math.cos(a) * L, -Math.sin(a), -Math.cos(a)]; }
   fireMain(t, d) {
     const g = this.g, [mx, my, mz, fx, fz] = this.muzzleTank(), P = this.kind === 'tank' ? this.T : this.A;
-    SND.gunshot(P.snd, mx, my, mz); g.fx.muzzle(mx, my, mz, fx, 0, fz, 2.2); g.fx.smoke.emit(mx, this.y + .3, mz, 0, .5, 0, 2.5, 2, 6, .55, .5, .42, .4); // muzzle blast kicks up dust
-    const vs = t.kind === 'tank' || t.kind === 'gun'; const acc = (this.kind === 'gun' ? .85 : .7) * clamp(1.15 - d / 600, .25, 1) * (this.speed > .5 ? .5 : 1);
+    const vs = t.kind === 'tank' || t.kind === 'gun'; const acc = (this.kind === 'gun' ? .85 : .8) * clamp(1.2 - d / 650, .3, 1) * (this.speed > .5 ? .55 : 1);
     const hit = Math.random() < acc; const ix = t.x + (hit ? 0 : (Math.random() - .5) * (6 + d * .03)), iz = t.z + (hit ? 0 : (Math.random() - .5) * (6 + d * .03)); const iy = g.world.H(ix, iz) + (hit && vs ? 1.2 : 0);
-    g.fx.tracer(mx, my, mz, (ix - mx) / d, (iy - my) / d, (iz - mz) / d, 760, 3, [1, .7, .35], d / 760 + .05);
-    setTimeout(() => {
+    g.cannonFx(P.snd, mx, my, mz, fx, fz, ix, iy, iz, d, this.y);
+    g.after(d / 760, () => {
       if (vs && hit && t.alive) g.armourHit(t, this, P.pen100 - P.penDrop * Math.max(0, d - 100) / 100, mx, mz);
-      else { g.explode(ix, iy, iz, this.kind === 'tank' && this.team === 0 ? .55 : .8, this, P.splash || (this.kind === 'gun' ? 2.5 : 4)); }
-      g.bulletNearPlayer(mx, my, mz, (ix - mx) / d, (iy - my) / d, (iz - mz) / d, d, this, true, 3);
-    }, d / 760 * 1000);
+      else { g.explode(ix, iy, iz, this.kind === 'tank' && this.team === 0 ? .7 : 1.0, this, P.splash || (this.kind === 'gun' ? 2.5 : 4)); }
+    });
   }
   coax(t, d) {
-    const g = this.g, [mx, my, mz] = this.muzzleTank(); SND.gunshot(this.team === 0 ? 'mg34' : 'mg30', mx, my - .2, mz);
-    const dx = (t.x - mx) / d, dy = (t.y + 1 - my) / d, dz = (t.z - mz) / d; if (this.coaxBurst % 3 === 0) g.fx.tracer(mx, my - .2, mz, dx, dy, dz, 700, 8, [1, .45, .2]);
-    g.bulletNearPlayer(mx, my, mz, dx, dy, dz, d + 30, this, true);
-    let p = .16 * Math.pow(clamp(75 / (d + 8), .08, 2.6), 1.05); const st = t.stance ?? 0; p *= st === 2 ? .45 : st === 1 ? .75 : 1; p *= 1 - g.world.coverAt(t.x, t.z) * .6; if (t.isPlayer) p *= g.playerHitMul;
-    if (Math.random() < p && !g.world.rayBlock(mx, my, mz, t.x, t.y + 1, t.z, { noTrees: true })) { const part = Math.random() < .5 ? 'chest' : 'leg'; if (t.isPlayer) g.player.hurt(100, this, part); else t.hurt(100, this, part); }
-    else { const ix = t.x + (Math.random() - .5) * 4, iz = t.z + (Math.random() - .5) * 4; if (t.camD < 120) g.fx.impact(ix, g.world.H(ix, iz), iz, 'dirt'); if (!t.isPlayer) t.supp = Math.min(1, t.supp + .15); }
+    const g = this.g, [mx, my0, mz] = this.muzzleTank(), my = my0 - .2, human = t.isPlayer || t.isRemote;
+    const dx = (t.x - mx) / d, dy = (t.y + 1 - my) / d, dz = (t.z - mz) / d;
+    let p = .16 * Math.pow(clamp(75 / (d + 8), .08, 2.6), 1.05); const st = t.stance ?? 0; p *= st === 2 ? .45 : st === 1 ? .75 : 1; p *= 1 - g.world.coverAt(t.x, t.z) * .6; if (human) p *= g.playerHitMul;
+    let ix, iy, iz, mat;
+    if (Math.random() < p && !g.world.rayBlock(mx, my, mz, t.x, t.y + 1, t.z, { noTrees: true })) { const part = Math.random() < .5 ? 'chest' : 'leg'; if (human) g.hurtHuman(t, 100, this, part); else t.hurt(100, this, part); ix = t.x; iy = t.y + 1; iz = t.z; mat = 'flesh'; }
+    else { ix = t.x + (Math.random() - .5) * 4; iz = t.z + (Math.random() - .5) * 4; iy = g.world.H(ix, iz); mat = 'dirt'; if (!human) t.supp = Math.min(1, t.supp + .15); }
+    g.shotFx(this.team === 0 ? 'mg34' : 'mg30', mx, my, mz, dx, dy, dz, d, this.coaxBurst % 3 === 0, .5, ix, iy, iz, mat, this, true);
   }
   // ---------- AT guns
   thinkGun() {
@@ -363,4 +391,14 @@ export class Squad {
     else { m.mode = 'fire'; m.run = false; if (!m.wpt || Math.hypot(m.wpt[0] - m.x, m.wpt[1] - m.z) < 1) m.wpt = null; }
   }
   stepToward(m, goal, len) { const dx = goal[0] - m.x, dz = goal[1] - m.z, d = Math.hypot(dx, dz); if (d < len) return goal; return [m.x + dx / d * len, m.z + dz / d * len]; }
+}
+
+// ---------- another human in an online battle, as the host's AI sees them: positions come from their page, damage goes back to it
+const CLASS_UNIT = { rifleman: ['rifle', false], assault: ['rifle', true], gunner: ['mg', false], sniper: ['sniper', false], atrifle: ['rifle', false] };
+export function classUnit(cls) { return CLASS_UNIT[cls] || CLASS_UNIT.rifleman; }
+export class RemotePlayer extends Unit {
+  constructor(game, peer, team, cls, x, z, life, name) { const C = classUnit(cls); super(game, team, C[0], x, z, { leader: C[1] }); this.isRemote = true; this.peer = peer; this.life = life; this.name = name; this.cls = cls; this.hp = 100; this.netDelay = 140; this.grenades = 0; }
+  update(dt) { this.supp = 0; this.netUpdate(dt); }
+  /** their page owns their health: send the hit there */
+  hurt(dmg, from, part, how) { if (!this.alive) return false; this.g.sendHurt(this, dmg, from, part, typeof how === 'string' ? how : how?.how || ''); return false; }
 }

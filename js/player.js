@@ -85,7 +85,7 @@ export class Player {
     if (this.reloadT > 0) { this.reloadT -= dt; if (this.reloadT <= 0) { s.mags--; s.mag = w.clipLoad ? Math.min(w.clip, s.mag + 5) : w.clip; } }
     if (this.boltT > 0) { this.boltT -= dt; }
     // grenade: tap to throw (the fuse is lit as the arm comes back)
-    if (I.nadeTap) { I.nadeTap = false; if (this.nades > 0 && this.nadeT <= 0 && this.reloadT <= 0) { this.nades--; this.nadeT = 1.4; SND.mech('pin'); setTimeout(() => { if (!this.alive) return; SND.mech('throw'); const d = this.aimDir(); g.throwGrenadeFrom(this, this.x + d.x * .5, this.y + this.eyeH() + .1, this.z + d.z * .5, d.x * 15, d.y * 15 + 3.5, d.z * 15, this.nadeType.fuse - .9); }, 450); } }
+    if (I.nadeTap) { I.nadeTap = false; if (this.nades > 0 && this.nadeT <= 0 && this.reloadT <= 0) { this.nades--; this.nadeT = 1.4; SND.mech('pin'); g.after(.45, () => { if (!this.alive || g.player !== this) return; SND.mech('throw'); const d = this.aimDir(); g.throwGrenadeFrom(this, this.x + d.x * .5, this.y + this.eyeH() + .1, this.z + d.z * .5, d.x * 15, d.y * 15 + 3.5, d.z * 15, this.nadeType.fuse - .9); }); } }
     // fire
     const busy = this.reloadT > 0 || this.switchT > 0 || this.boltT > 0 || sprint || this.bandT > 0 || this.nadeT > .8;
     const trig = w.auto ? I.fire : I.firePressed; I.firePressed = false;
@@ -105,7 +105,8 @@ export class Player {
     // zeroed at 100 m: launch slightly up so the round crosses the sight line there
     const zero = G * 100 / (2 * w.mv * w.mv); d.y += zero;
     const ox = cam.position.x, oy = cam.position.y - .03, oz = cam.position.z;
-    g.fireRound({ x: ox, y: oy, z: oz, vx: d.x * w.mv, vy: d.y * w.mv, vz: d.z * w.mv, w, from: this, team: this.team, t: 0, tracer: w.mg && s.mag % 4 === 0 });
+    const tracer = w.mg && s.mag % 4 === 0; g.fireRound({ x: ox, y: oy, z: oz, vx: d.x * w.mv, vy: d.y * w.mv, vz: d.z * w.mv, w, from: this, team: this.team, t: 0, tracer });
+    g.playerShot(w.snd, ox, oy, oz, d.x, d.y, d.z, tracer);
     SND.gunshot(w.snd, ox, oy, oz, true); g.fx.flash(ox + d.x * 1.2, oy, oz + d.z * 1.2, .3);
     g.fx.smoke.emit(ox + d.x * 1.3, oy - .1, oz + d.z * 1.3, d.x * 2, .3, d.z * 2, 1, .15, .9, .8, .78, .75, .18, .95);
     // recoil: muzzle climb (partly recovered) + yaw wander; bipod / prone tame it

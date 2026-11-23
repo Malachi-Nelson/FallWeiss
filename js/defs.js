@@ -28,19 +28,20 @@ export const CLASSES = [
   { key: 'atrifle', label: 'AT Rifleman', type: 'rifle', gren: 1, team: 1, weps: [null, ['ur35', 'vis']] },
 ];
 
-// AI unit stats (FWCore BASE, RO2 ranges). acc is hit chance at ~75 m in the open.
+// AI unit stats (FWCore BASE, RO2 ranges). acc is hit chance at ~75 m in the open. speed: m/s at a normal advance with full kit
+// (riflemen rush at ×1.45 and charge the last metres at ×1.6; cavalry trot at ×.8 and canter at ×1.2).
 export const UNITS = {
-  rifle:  { kind: 'inf', hp: 100, speed: 3.6, range: 150, sight: 180, rof: 3.1, acc: .34, dmg: 100, snd: 'rifle' },
-  mg:     { kind: 'inf', hp: 100, speed: 3.0, range: 220, sight: 240, rof: .085, burst: 7, pause: 2.4, acc: .2, dmg: 100, snd: 'mg' },
-  sniper: { kind: 'inf', hp: 100, speed: 3.4, range: 220, sight: 240, rof: 4.6, acc: .8, dmg: 100, snd: 'rifle' },
-  crew:   { kind: 'inf', hp: 100, speed: 3.6, range: 120, sight: 160, rof: 3.3, acc: .3, dmg: 100, snd: 'rifle' },
-  cav:    { kind: 'cav', hp: 100, speed: 10, range: 80, sight: 140, rof: 3.2, acc: .3, dmg: 100, snd: 'rifle' },
+  rifle:  { kind: 'inf', hp: 100, speed: 2.2, range: 150, sight: 180, rof: 3.1, acc: .34, dmg: 100, snd: 'rifle' },
+  mg:     { kind: 'inf', hp: 100, speed: 1.9, range: 220, sight: 240, rof: .085, burst: 7, pause: 2.4, acc: .2, dmg: 100, snd: 'mg' },
+  sniper: { kind: 'inf', hp: 100, speed: 2.1, range: 220, sight: 240, rof: 4.6, acc: .8, dmg: 100, snd: 'rifle' },
+  crew:   { kind: 'inf', hp: 100, speed: 2.2, range: 120, sight: 160, rof: 3.3, acc: .3, dmg: 100, snd: 'rifle' },
+  cav:    { kind: 'cav', hp: 100, speed: 6.5, range: 80, sight: 140, rof: 3.2, acc: .3, dmg: 100, snd: 'rifle' },
   at:     { kind: 'gun', hp: 60, speed: 0, range: 450, sight: 450, rof: 4.5, acc: .7, dmg: 60, splash: 2.5 },
-  tank:   { kind: 'tank', hp: 420, speed: 6.5, range: 400, sight: 380, rof: 3.0, acc: .7, dmg: 70, splash: 4.5 },
+  tank:   { kind: 'tank', hp: 420, speed: 4.0, range: 400, sight: 380, rof: 3.0, acc: .7, dmg: 70, splash: 4.5 },
 };
 export const TANK = [
-  { name: 'Panzer II Ausf. C', gun: '2 cm KwK 30', hp: 520, armF: 14.5, armS: 14.5, armR: 10, pen100: 23, penDrop: 3, rof: 1.0, burst: 3, splash: 2.5, dmg: 55, speed: 6.8, snd: 'kwk20' },
-  { name: '7TP', gun: '37 mm wz.37', hp: 420, armF: 17, armS: 13, armR: 9, pen100: 45, penDrop: 4, rof: 3.2, burst: 1, splash: 4, dmg: 72, speed: 6.0, snd: 'cannon37' },
+  { name: 'Panzer II Ausf. C', gun: '2 cm KwK 30', hp: 650, armF: 14.5, armS: 14.5, armR: 10, pen100: 23, penDrop: 3, rof: .9, burst: 5, splash: 3.3, dmg: 55, speed: 4.2, snd: 'kwk20' },
+  { name: '7TP', gun: '37 mm wz.37', hp: 540, armF: 17, armS: 13, armR: 9, pen100: 45, penDrop: 4, rof: 2.8, burst: 1, splash: 5.2, dmg: 72, speed: 3.7, snd: 'cannon37' },
 ];
 export const ATGUN = [
   { name: '3.7 cm PaK 36', pen100: 38, penDrop: 2, snd: 'cannon37' },

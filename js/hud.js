@@ -20,7 +20,8 @@ export class Hud {
       <div id="ammo"><div id="wname"></div><div id="rounds"></div><div id="mags"></div><div id="nades"></div></div>
       <div id="status"><div id="hpbar"><div id="hpfill"></div></div><div id="stance"></div><div id="bleed">BLEEDING — bandage (B)</div></div>
       <div id="bigmap"><canvas id="mapc" width="720" height="720"></canvas><div id="maplegend"></div></div>`;
-    this.$ = id => el.querySelector('#' + id);
+    const cache = {}; this.$ = id => cache[id] || (cache[id] = el.querySelector('#' + id)); this.last = {};
+    this.put = (id, prop, v) => { const k = id + prop; if (this.last[k] === v) return; this.last[k] = v; if (prop === 'html') this.$(id).innerHTML = v; else if (prop === 'text') this.$(id).textContent = v; else this.$(id).style[prop] = v; };
     this.ov = this.$('ov'); this.ctx = this.ov.getContext('2d'); this.mini = this.$('mini').getContext('2d'); this.feedItems = []; this.bannerT = 0; this.hintT = 0; this.dmgV = 0; this.hmT = 0;
     // compass strip
     const cs = this.$('cstrip'); let h = ''; for (let i = -360; i <= 720; i += 15) { const d = ((i % 360) + 360) % 360; const lab = { 0: 'N', 90: 'E', 180: 'S', 270: 'W', 45: 'NE', 135: 'SE', 225: 'SW', 315: 'NW' }[d]; h += `<span style="left:${(i + 360) * 3}px" class="${lab ? 'maj' : ''}">${lab || '·'}</span>`; } cs.innerHTML = h;
@@ -48,34 +49,34 @@ export class Hud {
   ammoFlash() { this.ammoT = 1.2; }
   damage(from, p) { this.dmgV = Math.min(1, this.dmgV + .6); if (from) { this.dmgDir = Math.atan2(from.x - p.x, from.z - p.z); this.dmgDirT = 1.5; } }
   hit(kill) { this.hmT = .25; this.$('hm').style.color = kill ? '#ff5040' : '#fff'; }
-  banner(t, sub = '', dur = 3.5) { this.$('banner').innerHTML = `<div>${t}</div>${sub ? `<small>${sub}</small>` : ''}`; this.bannerT = dur; }
-  hint(t, dur = 3) { this.$('hint').textContent = t; this.hintT = dur; }
+  banner(t, sub = '', dur = 3.5) { this.put('banner', 'html', `<div>${t}</div>${sub ? `<small>${sub}</small>` : ''}`); this.bannerT = dur; }
+  hint(t, dur = 3) { this.put('hint', 'text', t); this.hintT = dur; }
   feed(txt, col) { this.feedItems.unshift({ txt, col, t: 6 }); if (this.feedItems.length > 6) this.feedItems.pop(); this.renderFeed(); }
   renderFeed() { this.$('feed').innerHTML = this.feedItems.map(f => `<div style="opacity:${Math.min(1, f.t)};color:${f.col || '#ddd'}">${f.txt}</div>`).join(''); }
-  toggleMap(v) { this.mapOpen = v ?? !this.mapOpen; this.$('bigmap').style.display = this.mapOpen ? 'flex' : 'none'; }
+  toggleMap(v) { this.mapOpen = v ?? !this.mapOpen; this.put('bigmap', 'display', this.mapOpen ? 'flex' : 'none'); }
 
   update(dt) {
     const g = this.g, p = g.player, cam = g.camera;
     // objectives
-    const ob = g.objectives; this.$('objs').innerHTML = ob.map((o, i) => { const own = o.owner, act = i === g.activeObj, prog = act ? o.prog : 0; const L = String.fromCharCode(65 + i);
-      return `<div class="obj ${act ? 'act' : ''}" style="--c:${TEAMCOL[own]};--p:${(prog * 100).toFixed(0)}%;--pc:${TEAMCOL[g.M.attacker]}" title="${o.n}"><span>${L}</span></div>`; }).join('');
+    const ob = g.objectives; this.put('objs', 'html', ob.map((o, i) => { const own = o.owner, act = i === g.activeObj, prog = act ? o.prog : 0; const L = String.fromCharCode(65 + i);
+      return `<div class="obj ${act ? 'act' : ''}" style="--c:${TEAMCOL[own]};--p:${(prog * 100).toFixed(0)}%;--pc:${TEAMCOL[g.M.attacker]}" title="${o.n}"><span>${L}</span></div>`; }).join(''));
     const myT = g.player ? g.player.team : g.side;
-    this.$('tk0').innerHTML = `<b style="color:${TEAMCOL[0]}">${SIDE_SHORT[0]}</b> ${Math.max(0, g.tickets[0] | 0)}`; this.$('tk1').innerHTML = `${Math.max(0, g.tickets[1] | 0)} <b style="color:${TEAMCOL[1]}">${SIDE_SHORT[1]}</b>`;
-    const tl = Math.max(0, g.timeLeft); this.$('clock').textContent = `${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')}` + (g.activeObj < ob.length ? ` · ${ob[g.activeObj].n}` : '');
+    this.put('tk0', 'html', `<b style="color:${TEAMCOL[0]}">${SIDE_SHORT[0]}</b> ${Math.max(0, g.tickets[0] | 0)}`); this.put('tk1', 'html', `${Math.max(0, g.tickets[1] | 0)} <b style="color:${TEAMCOL[1]}">${SIDE_SHORT[1]}</b>`);
+    const tl = Math.max(0, g.timeLeft); this.put('clock', 'text', `${Math.floor(tl / 60)}:${String(Math.floor(tl % 60)).padStart(2, '0')}` + (g.activeObj < ob.length ? ` · ${ob[g.activeObj].n}` : '') + (g.net ? ` · online, ${Object.keys(g.online.lastSnap?.pl || {}).length || g.remotes.size + 1} players` : ''));
     // compass (north = -z)
-    const hdg = ((-g.camYaw * 180 / Math.PI) % 360 + 360) % 360; this.$('cstrip').style.transform = `translateX(${-(hdg + 360) * 3 + 150}px)`;
+    const hdg = ((-g.camYaw * 180 / Math.PI) % 360 + 360) % 360; this.put('cstrip', 'transform', `translateX(${(-(hdg + 360) * 3 + 150).toFixed(1)}px)`);
     // ammo
-    if (p && p.alive) { const s = p.slot, w = s.w; this.$('wname').textContent = w.name; const pips = w.clip <= 10 ? '▮'.repeat(s.mag) + '▯'.repeat(w.clip - s.mag) : `<span class="mg">${s.mag > w.clip * .5 ? 'Heavy' : s.mag > w.clip * .15 ? 'Light' : s.mag > 0 ? 'Nearly empty' : 'Empty'}</span>`;
-      this.$('rounds').innerHTML = p.reloadT > 0 ? '<span class="mg">Reloading…</span>' : pips; this.$('mags').textContent = (w.clipLoad ? 'Clips ' : w.mg ? 'Belts ' : 'Mags ') + s.mags; this.$('nades').textContent = '🞄'.repeat(p.nades) ? `Grenades ${p.nades}` : '';
-      this.$('hpfill').style.width = Math.max(0, p.hp) + '%'; this.$('hpfill').style.background = p.hp > 60 ? '#9bb07a' : p.hp > 30 ? '#c9a24a' : '#b0412e';
-      this.$('stance').textContent = ['Standing', 'Crouched', 'Prone'][p.stance] + (p.stamina < .25 ? ' · winded' : ''); this.$('bleed').style.display = p.bleed > 0 && p.bandT <= 0 ? 'block' : 'none'; if (p.bandT > 0) { this.$('bleed').style.display = 'block'; this.$('bleed').textContent = 'Bandaging…'; } else this.$('bleed').textContent = g.touch ? 'BLEEDING — tap BANDAGE' : 'BLEEDING — bandage (B)';
+    if (p && p.alive) { const s = p.slot, w = s.w; this.put('wname', 'text', w.name); const pips = w.clip <= 10 ? '▮'.repeat(Math.max(0, s.mag)) + '▯'.repeat(Math.max(0, w.clip - s.mag)) : `<span class="mg">${s.mag > w.clip * .5 ? 'Heavy' : s.mag > w.clip * .15 ? 'Light' : s.mag > 0 ? 'Nearly empty' : 'Empty'}</span>`;
+      this.put('rounds', 'html', p.reloadT > 0 ? '<span class="mg">Reloading…</span>' : pips); this.put('mags', 'text', (w.clipLoad ? 'Clips ' : w.mg ? 'Belts ' : 'Mags ') + s.mags); this.put('nades', 'text', p.nades > 0 ? `Grenades ${p.nades}` : '');
+      this.put('hpfill', 'width', Math.max(0, p.hp | 0) + '%'); this.put('hpfill', 'background', p.hp > 60 ? '#9bb07a' : p.hp > 30 ? '#c9a24a' : '#b0412e');
+      this.put('stance', 'text', ['Standing', 'Crouched', 'Prone'][p.stance] + (p.stamina < .25 ? ' · winded' : '')); this.put('bleed', 'display', (p.bleed > 0 && p.bandT <= 0) || p.bandT > 0 ? 'block' : 'none'); this.put('bleed', 'text', p.bandT > 0 ? 'Bandaging…' : g.touch ? 'BLEEDING — tap BANDAGE' : 'BLEEDING — bandage (B)');
       g.touchUI?.setBandage(p.bleed > 0 && p.bandT <= 0); g.touchUI?.setAds(p.ads); g.touchUI?.setStance(p.stance);
     }
     // vignettes
     this.dmgV = Math.max(0, this.dmgV - dt * .8); const lowHp = p && p.alive ? Math.max(0, (50 - p.hp) / 50) : 0;
-    this.$('dmg').style.opacity = Math.min(1, this.dmgV + lowHp * .5); this.$('supp').style.opacity = p ? Math.min(.85, p.supp * .9) : 0;
-    this.hmT -= dt; this.$('hm').style.opacity = this.hmT > 0 ? 1 : 0;
-    this.bannerT -= dt; this.$('banner').style.opacity = Math.max(0, Math.min(1, this.bannerT)); this.hintT -= dt; this.$('hint').style.opacity = Math.max(0, Math.min(1, this.hintT));
+    this.put('dmg', 'opacity', Math.min(1, this.dmgV + lowHp * .5).toFixed(2)); this.put('supp', 'opacity', (p ? Math.min(.85, p.supp * .9) : 0).toFixed(2));
+    this.hmT -= dt; this.put('hm', 'opacity', this.hmT > 0 ? '1' : '0');
+    this.bannerT -= dt; this.put('banner', 'opacity', Math.max(0, Math.min(1, this.bannerT)).toFixed(2)); this.hintT -= dt; this.put('hint', 'opacity', Math.max(0, Math.min(1, this.hintT)).toFixed(2));
     let ch = false; for (const f of this.feedItems) { const o = f.t; f.t -= dt; if ((o > 1) !== (f.t > 1) || f.t < 1) ch = true; } this.feedItems = this.feedItems.filter(f => f.t > 0); if (ch) this.renderFeed();
     this.drawOverlay(dt); this.miniT = (this.miniT || 0) - dt; if (this.miniT <= 0) { this.miniT = .1; this.drawMini(this.mini, 180, 70, true); } if (this.mapOpen) { this.mapT = (this.mapT || 0) - dt; if (this.mapT <= 0) { this.mapT = .2; this.drawBig(); } }
   }
@@ -89,8 +90,8 @@ export class Hud {
     // friendly markers within 60 m (RO2 nametags), objective marker
     c.font = `${11 * d}px system-ui`; c.textAlign = 'center';
     for (const u of g.units) { if (!u.alive || u.team !== p.team || u.kind === 'gun') continue; const dd = Math.hypot(u.x - p.x, u.z - p.z); if (dd > 70 || dd < 2) continue; V.set(u.x, u.y + (u.kind === 'tank' ? 3.4 : u.stance === 2 ? .9 : u.stance === 1 ? 1.6 : 2.15), u.z).project(cam); if (V.z > 1) continue;
-      const x = (V.x + 1) / 2 * W, y = (1 - V.y) / 2 * H; c.globalAlpha = Math.min(1, (70 - dd) / 20) * .85; c.fillStyle = u.squad === g.playerSquad ? '#9fe08a' : '#7fb0ff'; c.beginPath(); c.moveTo(x - 5 * d, y - 6 * d); c.lineTo(x + 5 * d, y - 6 * d); c.lineTo(x, y); c.fill();
-      if (dd < 12 && Math.abs(x - W / 2) < W * .12 && Math.abs(y - H / 2) < H * .2) c.fillText(u.name, x, y - 9 * d); }
+      const x = (V.x + 1) / 2 * W, y = (1 - V.y) / 2 * H; c.globalAlpha = Math.min(1, (70 - dd) / 20) * .85; c.fillStyle = u.human || u.isRemote ? '#ffe08a' : u.squad === g.playerSquad ? '#9fe08a' : '#7fb0ff'; c.beginPath(); c.moveTo(x - 5 * d, y - 6 * d); c.lineTo(x + 5 * d, y - 6 * d); c.lineTo(x, y); c.fill();
+      if ((u.human || u.isRemote) && dd < 70 || dd < 12 && Math.abs(x - W / 2) < W * .12 && Math.abs(y - H / 2) < H * .2) c.fillText(u.name, x, y - 9 * d); }
     c.globalAlpha = 1;
     const o = g.objectives[g.activeObj]; if (o) { V.set(o.x, g.world.H(o.x, o.z) + 6, o.z).project(cam); if (V.z < 1) { const x = (V.x + 1) / 2 * W, y = (1 - V.y) / 2 * H; const dd = Math.hypot(o.x - p.x, o.z - p.z); c.fillStyle = 'rgba(255,230,160,.85)'; c.font = `bold ${13 * d}px system-ui`; c.fillText(String.fromCharCode(65 + g.activeObj) + `  ${dd | 0} m`, x, y); } }
     // damage direction
@@ -108,7 +109,7 @@ export class Hud {
   drawMarks(c, px) {
     const g = this.g, myT = g.player ? g.player.team : g.side;
     g.objectives.forEach((o, i) => { c.strokeStyle = TEAMCOL[o.owner]; c.fillStyle = TEAMCOL[o.owner] + '44'; c.lineWidth = 2 * px * (i === g.activeObj ? 2 : 1); c.beginPath(); c.arc(o.x, o.z, o.r, 0, 6.3); c.fill(); c.stroke(); c.fillStyle = '#fff'; c.font = `bold ${14 * px}px system-ui`; c.textAlign = 'center'; c.fillText(String.fromCharCode(65 + i), o.x, o.z + 5 * px); });
-    for (const u of g.units) { if (!u.alive) continue; const mine = u.team === myT; if (!mine && !(u.spottedT > g.time)) continue; c.fillStyle = mine ? (u.squad === g.playerSquad ? '#9fe08a' : '#7fb0ff') : '#ff5a40'; const r = (u.kind === 'tank' ? 5 : u.kind === 'gun' ? 4 : 2.6) * px; if (u.kind === 'tank' || u.kind === 'gun') c.fillRect(u.x - r, u.z - r, 2 * r, 2 * r); else { c.beginPath(); c.arc(u.x, u.z, r, 0, 6.3); c.fill(); } }
+    for (const u of g.units) { if (!u.alive) continue; const mine = u.team === myT; if (!mine && !((u.spotted?.[myT] || 0) > g.time)) continue; c.fillStyle = mine ? (u.human || u.isRemote ? '#ffe08a' : u.squad === g.playerSquad ? '#9fe08a' : '#7fb0ff') : '#ff5a40'; const r = (u.kind === 'tank' ? 5 : u.kind === 'gun' ? 4 : 2.6) * px; if (u.kind === 'tank' || u.kind === 'gun') c.fillRect(u.x - r, u.z - r, 2 * r, 2 * r); else { c.beginPath(); c.arc(u.x, u.z, r, 0, 6.3); c.fill(); } }
     for (const s of g.markers) { c.strokeStyle = s.col; c.lineWidth = 2 * px; c.beginPath(); c.arc(s.x, s.z, s.r, 0, 6.3); c.stroke(); }
   }
   drawBig() {
