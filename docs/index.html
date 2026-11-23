@@ -30,6 +30,11 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
 .row{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
 .lab{font-size:12px;letter-spacing:.15em;color:var(--dim);margin-top:10px;text-transform:uppercase}
 #ver{font-size:11px;color:#6f6754;margin-top:10px}
+#online .small{font-size:12px;color:var(--dim);line-height:1.4}
+#online input{font:inherit;font-size:14px;color:var(--ink);background:rgba(40,36,28,.85);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:11em;user-select:text;-webkit-user-select:text}
+#online .game{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:7px 0}
+#online .game small{display:block;color:var(--dim);font-size:11px;margin-top:2px}
+#on-games{margin:4px 0}
 @media (max-width:760px),(max-height:500px){.mwrap{grid-template-columns:1fr;padding:10px}#missions{flex-direction:row;flex-wrap:wrap}#missions .mis{flex:1 1 30%}#brief p{font-size:13px;max-height:110px;overflow:auto}}
 #loading{background:#14120e;flex-direction:column;gap:14px}
 #lbox{width:min(420px,80vw);height:6px;background:#2a261e;border-radius:3px;overflow:hidden}#lbar{height:100%;width:0;background:var(--acc);transition:width .2s}
@@ -101,6 +106,7 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
           <div class="row" style="margin-top:14px"><button id="start" class="big">To the front</button><button id="fs">Full screen</button></div>
           <div id="ver"></div>
         </div>
+        <div class="card" id="online" style="margin-top:10px"></div>
       </div>
     </div>
   </div>
@@ -113,6 +119,7 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
   <div id="rotate"><div>📱</div>Turn your phone sideways to fight.</div>
   <div id="fps"></div>
 </div>
+<script src="js/net/mqtt.min.js" async></script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

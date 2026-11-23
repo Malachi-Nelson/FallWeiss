@@ -2,6 +2,7 @@
 // Two point-sprite systems (alpha and additive) keep the whole battlefield at two draw calls for particles.
 import * as THREE from './three.module.min.js';
 
+const TINT = { value: new THREE.Color(1, 1, 1) };
 function puffTexture() {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S; const g = c.getContext('2d');
   const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(.5, 'rgba(255,255,255,.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, S, S);
@@ -16,10 +17,10 @@ class PointSys {
     this.col = new Float32Array(cap * 4); this.a0 = new Float32Array(cap); this.drag = new Float32Array(cap); this.grav = new Float32Array(cap); this.size = new Float32Array(cap); this.rgba = new Float32Array(cap * 4);
     const g = new THREE.BufferGeometry(); this.pa = new THREE.BufferAttribute(this.p, 3); this.sa = new THREE.BufferAttribute(this.size, 1); this.ca = new THREE.BufferAttribute(this.rgba, 4);
     for (const a of [this.pa, this.sa, this.ca]) a.setUsage(THREE.DynamicDrawUsage); g.setAttribute('position', this.pa); g.setAttribute('size', this.sa); g.setAttribute('rgba', this.ca); g.setDrawRange(0, 0);
-    this.uniforms = { tex: { value: tex }, scale: { value: 600 }, fogColor: { value: new THREE.Color() }, fogNear: { value: 100 }, fogFar: { value: 900 } };
+    this.uniforms = { tex: { value: tex }, scale: { value: 600 }, fogColor: { value: new THREE.Color() }, fogNear: { value: 100 }, fogFar: { value: 900 }, tint: TINT };
     const m = new THREE.ShaderMaterial({ uniforms: this.uniforms, transparent: true, depthWrite: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       vertexShader: `attribute float size; attribute vec4 rgba; varying vec4 vC; varying float vF; uniform float scale; void main(){ vC = rgba; vec4 mv = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * mv; gl_PointSize = min(512.0, size * scale / -mv.z); vF = -mv.z; }`,
-      fragmentShader: `uniform sampler2D tex; uniform vec3 fogColor; uniform float fogNear, fogFar; varying vec4 vC; varying float vF; void main(){ vec4 t = texture2D(tex, gl_PointCoord); float f = smoothstep(fogNear, fogFar, vF); vec4 c = vec4(vC.rgb, vC.a * t.a); ${additive ? 'c.rgb *= c.a * (1.0 - f);' : 'c.rgb = mix(c.rgb, fogColor, f*0.85);'} gl_FragColor = c; }` });
+      fragmentShader: `uniform sampler2D tex; uniform vec3 fogColor, tint; uniform float fogNear, fogFar; varying vec4 vC; varying float vF; void main(){ vec4 t = texture2D(tex, gl_PointCoord); float f = smoothstep(fogNear, fogFar, vF); vec4 c = vec4(vC.rgb, vC.a * t.a); ${additive ? 'c.rgb *= c.a * (1.0 - f);' : 'c.rgb = mix(c.rgb * tint * (0.85 + 0.3 * (1.0 - t.a)), fogColor, f*0.85);'} gl_FragColor = c; }` });
     this.pts = new THREE.Points(g, m); this.pts.frustumCulled = false; this.pts.renderOrder = additive ? 3 : 2; scene.add(this.pts); this.g = g;
   }
   emit(x, y, z, vx, vy, vz, life, s0, s1, r, g, b, a, drag = 1, grav = 0) {
@@ -50,6 +51,8 @@ export class Fx {
     this.emitters = []; this.rain = null; this.windX = .6; this.windZ = .2;
   }
   setFog(c, n, f) { for (const s of [this.smoke, this.glow]) { s.uniforms.fogColor.value.copy(c); s.uniforms.fogNear.value = n; s.uniforms.fogFar.value = f; } }
+  /** smoke and dust pick up the colour of the light: warm at dawn, grey under rain */
+  setTint(c) { TINT.value.copy(c); }
   setScale(h) { this.smoke.uniforms.scale.value = this.glow.uniforms.scale.value = h * .9; }
   flash(x, y, z, power = 1) { if (power >= this.light.intensity / 40) { this.light.position.set(x, y, z); this.light.intensity = 40 * power; this.light.distance = 12 + power * 18; this.lightT = .05 + power * .05; } }
   muzzle(x, y, z, dx, dy, dz, big = 1) {

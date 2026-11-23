@@ -25,9 +25,30 @@ Unity version of the game (3D RTS/FPS, URP).
 - Desktop: WASD, mouse, LMB fire, RMB aim, C crouch, Z prone, R reload, G grenade, Q switch, B bandage, M map, Esc pause.
 - `?m=<n>` opens a battle directly (0 Westerplatte … 7 Test Range); `&side=1` plays the Polish side; `&go=1` skips the menu.
 
+### Playing online
+The menu's **Play online** card lists battles hosted in your room. Pick your side, then **Join**; or set up a battle and press
+**Host this battle online**. **New private room** gives you an invite link (`…/FallWeiss/#abc123`) for friends only.
+Co-op and versus are the same thing here: humans pick sides, the AI fills both armies.
+
+- No game server: like Loss of Signal, HoodWar and Zombies, every page talks through free public MQTT relays
+  (`js/net/relay.js`, MQTT.js 4.3.7, MIT licence), so home routers and phone networks are not in the way.
+- The host's page runs the battle (all AI, objectives, tickets, artillery, Stukas) and sends a snapshot about 7 times a second
+  (`js/net/online.js`); everyone else runs their own soldier and draws the snapshots. What you hit on your screen is what you hit.
+- The host must keep their tab open: if it closes or sleeps, the battle ends for everyone.
+
+### Graphics (1.1)
+Leaf-card trees with wind and light through the leaves, a cloud deck whose shadows drift across the ground, bloom and sun shafts,
+texel-snapped sun shadows (4096 on desktop High), ground darkening under trees and along walls, field-to-field colour variation,
+moving water, smoke lit by the time of day, and grass sprays matched to the ground.
+
+### Checks
+`webtest/` has headless Chrome checks (serve `docs/` on 127.0.0.1:8765 first): `node webtest/smoke.mjs` opens every battle and
+fights it for a while; `node webtest/online.mjs` plays a host and a joiner against each other through a stand-in relay.
+
 | File | What is in it |
 |---|---|
 | `js/main.js` | Game director: missions, forces, squads and commanders, capture, waves and tickets, Stukas / artillery / the Schleswig-Holstein, ballistics, loop |
+| `js/net/online.js`, `js/net/relay.js` | Online battles: lobby, host snapshots, players' reports, the relay connection |
 | `js/world.js` | Terrain (World.cs port), splat-textured ground, buildings, villages, forests, rails, water, sky, collision and line-of-sight |
 | `js/units.js` | Soldiers, cavalry, tanks and AT guns: RO2-style AI (spotting, cover, suppression, bounding advance), armour vs penetration |
 | `js/player.js` | First-person soldier: movement, stances, projectiles with drop, bolt cycling, recoil, sway, grenades, bleeding |

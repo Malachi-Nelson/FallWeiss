@@ -5,6 +5,7 @@ import * as THREE from './three.module.min.js';
 import { spawnModel, hasModel } from './models.js';
 import { TEX } from './textures.js';
 import { Rng, clamp, sm, lerp, segD } from './defs.js';
+import { FOGU, CLOUD_GLSL } from './look.js';
 
 // ---------------- geometry builder ----------------
 export class GB {
@@ -103,7 +104,10 @@ vec3 L2(sampler2D t, float s){ vec3 a = texture2D(t, vW / s).rgb; vec3 b = textu
       .replace('#include <map_fragment>', `
 vec4 w = clamp(vSplat, 0.0, 1.0); float wg = clamp(1.0 - w.x - w.y - w.z - w.w, 0.0, 1.0);
 vec3 tc = L2(t_grass, 3.2) * wg + L2(t_stubble, 4.0) * w.w + L2(t_dirt, 3.0) * w.x + L2(t_gravel, 2.6) * w.y + L2(t_cobble, 3.5) * w.z;
-diffuseColor.rgb *= tc * 1.9;`)
+diffuseColor.rgb *= tc * 1.9;
+#if defined(USE_FOG) && defined(FW_PATCHED)
+{ float mv = texture2D(fwNoise, vW / 760.0 + 0.21).g, mv2 = texture2D(fwNoise, vW / 2300.0).r; diffuseColor.rgb *= mix(vec3(1.07, 1.01, 0.84), vec3(0.9, 1.0, 1.05), mv) * (0.9 + mv2 * 0.2); }
+#endif`)
       .replace('#include <normal_fragment_maps>', `
 { vec3 nm = (texture2D(n_grass, vW/3.2).xyz*2.0-1.0) * (wg + w.w) + (texture2D(n_cobble, vW/3.5).xyz*2.0-1.0) * w.z + (texture2D(n_dirt, vW/3.0).xyz*2.0-1.0) * (w.x + w.y);
   vec3 nw = normalize((vec4(normal,0.0) * viewMatrix).xyz); nw = normalize(nw + vec3(nm.x, 0.0, -nm.y) * 0.55);
@@ -115,6 +119,29 @@ diffuseColor.rgb *= tc * 1.9;`)
 export function texMat(name, opts = {}) {
   const t = TEX[name]; const m = new THREE.MeshStandardMaterial({ map: t.map, normalMap: opts.noNormal ? null : t.normal, vertexColors: !!opts.vc, roughness: opts.rough ?? .9, metalness: opts.metal ?? 0, side: opts.side ?? THREE.FrontSide, transparent: !!opts.transparent, alphaTest: opts.alphaTest ?? 0 });
   if (m.normalMap) m.normalScale.set(opts.ns ?? 1, opts.ns ?? 1); return m;
+}
+const NORMAL_NOFLIP = THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '');
+/** Leaf / needle cards: alpha-cut clumps that sway in the wind, keep their rounded crown normals on both sides, and glow when
+ *  the sun is behind them (light through leaves). */
+export function foliageMat(texName, q) {
+  const m = new THREE.MeshStandardMaterial({ map: TEX[texName].map, alphaTest: .4, side: THREE.DoubleSide, vertexColors: true, roughness: .8, metalness: 0 });
+  if (q >= 2) m.alphaToCoverage = true;
+  m.onBeforeCompile = sh => {
+    sh.uniforms.fwTime = FOGU.fwTime;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float fwTime;').replace('#include <begin_vertex>', `#include <begin_vertex>
+ { vec3 ip = vec3(0.0);
+ #ifdef USE_INSTANCING
+   ip = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+ #endif
+   float hgt = max(position.y - 2.0, 0.0), sw = sin(fwTime * 1.1 + ip.x * 0.07 + ip.z * 0.05) * 0.6 + sin(fwTime * 2.3 + ip.x * 0.13 + ip.z * 0.11) * 0.25;
+   transformed.x += sw * hgt * 0.012; transformed.z += sw * hgt * 0.008;
+   transformed += normal * sin(fwTime * 5.0 + position.x * 2.7 + position.z * 1.9 + ip.x) * 0.03; }`);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', NORMAL_NOFLIP).replace('#include <fog_fragment>', `#if defined(USE_FOG) && defined(FW_PATCHED)
+ { vec3 Vw = normalize(vFogW - cameraPosition); float tr = pow(max(dot(Vw, normalize(fwSunDir)), 0.0), 5.0); gl_FragColor.rgb += diffuseColor.rgb * fwSunCol * tr * 0.6 * fwCS; }
+#endif
+#include <fog_fragment>`);
+  };
+  m.customProgramCacheKey = () => 'fwleaf1'; return m;
 }
 /** Shared material for the original vertex-coloured models, with a triplanar cloth / painted-steel detail texture (texture pass). */
 export function modelMaterial(kind = 'cloth') {
@@ -265,6 +292,9 @@ export class World {
     if (this.WL != null && y < this.WL + 1.2) dirt = Math.max(dirt, 1 - sm(this.WL + .2, this.WL + 1.2, y));
     if (M.hasSea && y < 2.2) { grav = Math.max(grav, 1 - sm(1, 2.2, y)); }
     const n = F(x * .02 + 3, z * .02, 3); k = .78 + n * .38 - forest * .12;
+    let ao = 0; for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) { const tl = this.gridGet(this.tgrid, x + di * 8, z + dj * 8, 8); if (tl) for (const t of tl) { const cr = (t.k === 0 ? 2.2 : t.k === 3 ? 1.6 : 3.2) * t.s, d = Math.hypot(x - t.x, z - t.z); if (d < cr) ao = Math.max(ao, (1 - d / cr) * (t.k === 0 ? .25 : .4)); } }
+    for (const s of this.specs) { const dx = Math.max(0, Math.abs(x - s.cx) - s.w / 2), dz = Math.max(0, Math.abs(z - s.cz) - s.d / 2), d = Math.hypot(dx, dz); if (d < 2.5) ao = Math.max(ao, (1 - d / 2.5) * .35); }
+    k *= 1 - ao;
     const tot = dirt + grav + cob + stub; if (tot > 1) { dirt /= tot; grav /= tot; cob /= tot; stub /= tot; }
     return { s: [dirt, grav, cob, stub], k };
   }
@@ -337,31 +367,58 @@ export class World {
     for (const k in groups) { const g = groups[k]; if (!g.vc) continue; const m = new THREE.Mesh(g.build(), mats[k] || mats.plaster); m.castShadow = true; m.receiveShadow = true; this.group.add(m); }
   }
 
-  // ---- trees: instanced, chunked so off-screen chunks are culled
+  // ---- trees: leafy card crowns (alpha-cut clumps on a dense core), instanced and chunked so off-screen chunks are culled
   buildTrees() {
-    const pine = new GB(), broad = new GB(), birch = new GB(), fruit = new GB(), trunkP = new GB(), trunkB = new GB();
-    // Scots pine: tall bare orange trunk, flat crown high up
-    trunkP.cyl(0, -.5, 0, .22, .14, 14, 5, [1, 1, 1], 1.2, 2);
-    const cone = (gb, y, r, h, seg, col) => { for (let s = 0; s < seg; s++) { const a0 = s / seg * 6.283, a1 = (s + 1) / seg * 6.283; const j0 = 1 + Math.sin(a0 * 3 + y) * .15, j1 = 1 + Math.sin(a1 * 3 + y) * .15; gb.tri([Math.cos(a0) * r * j0, y, Math.sin(a0) * r * j0], [0, y + h, 0], [Math.cos(a1) * r * j1, y, Math.sin(a1) * r * j1], [[a0, 0], [a0 + .5, 2], [a1, 0]], col); gb.tri([Math.cos(a1) * r * j1, y, Math.sin(a1) * r * j1], [0, y - h * .25, 0], [Math.cos(a0) * r * j0, y, Math.sin(a0) * r * j0], [[a1, 0], [a0 + .5, -1], [a0, 0]], col.map(c => c * .6)); } };
-    cone(pine, 9.4, 2.4, 3.0, 7, [.9, .9, .9]); cone(pine, 11.4, 2.1, 2.8, 7, [1.05, 1.05, 1.05]); cone(pine, 13.2, 1.3, 2.2, 6, [1.1, 1.1, 1.1]);
-    // broadleaf (oak / lime): lumpy multi-blob crown
-    trunkB.cyl(0, -.5, 0, .32, .2, 6.5, 6, [1, 1, 1], 1.2, 2);
-    const det = this.q >= 2 ? 1 : 0; const blob = (gb, cx, cy, cz, r, seed, col) => { const ico = new THREE.IcosahedronGeometry(r, det); const p = ico.attributes.position; for (let i = 0; i < p.count; i += 3) { const v = []; for (let k = 0; k < 3; k++) { const x = p.getX(i + k), y = p.getY(i + k), z = p.getZ(i + k), d = 1 + Math.sin(x * 3.1 + seed) * .12 + Math.cos(z * 2.7 + y * 2 + seed) * .12; v.push([cx + x * d, cy + y * d * .85, cz + z * d]); } gb.tri(v[0], v[1], v[2], [[v[0][0] / 3, v[0][1] / 3], [v[1][0] / 3, v[1][1] / 3], [v[2][0] / 3, v[2][1] / 3]], col.map(c => c * (.7 + (v[0][1] - cy + r) / (2 * r) * .5))); } };
-    blob(broad, .3, 7.4, 0, 3.4, 1, [1, 1, 1]); blob(broad, -1.3, 6.4, -.8, 2.6, 3, [.9, .9, .9]); if (!det) { blob(broad, 1.4, 6.6, 1, 2.4, 7, [.95, .95, .95]); blob(broad, -.2, 8.6, .6, 2.2, 8, [1.05, 1.05, 1.05]); }
-    birch.cyl(0, -.5, 0, .16, .1, 9, 6, [1.6, 1.6, 1.5], 1, 2); blob(birch, 0, 8, 0, 2.1, 4, [1.1, 1.1, 1]); blob(birch, .5, 6.6, .3, 1.6, 5, [1, 1, 1]);
-    fruit.cyl(0, -.3, 0, .14, .1, 2.2, 6, [.8, .7, .6], 1, 2); blob(fruit, 0, 2.8, 0, 1.7, 6, [1, 1, 1]);
-    const mats = { pine: texMat('needles', { vc: true, ns: 1.2 }), broad: texMat('leaves', { vc: true }), birch: texMat('leavesB', { vc: true }), fruit: texMat('leaves', { vc: true }), trunkP: texMat('pinebark', { vc: true }), trunkB: texMat('bark', { vc: true }) };
-    for (const m of [mats.pine, mats.broad, mats.birch, mats.fruit]) m.side = THREE.DoubleSide;
-    const geos = { pine: pine.build(), broad: broad.build(), birch: birch.build(), fruit: fruit.build(), trunkP: trunkP.build(), trunkB: trunkB.build() };
-    const layers = [['pine', 'trunkP'], ['broad', 'trunkB'], ['birch', null], ['fruit', null]]; // birch & fruit trunks are in the crown geo
-    const chunk = this.q >= 2 ? 200 : 260, buckets = new Map();
+    const q = this.q, N = (a, b, c) => [a, b, c][q] ?? b;
+    const pine = new GB(), broad = new GB(), birch = new GB(), fruit = new GB(), trunkP = new GB(), trunkB = new GB(), trunkW = new GB(), trunkF = new GB();
+    const R = new Rng(97), up = [0, 1, 0];
+    /** one card: centre p, facing (yaw, tilt), size; lit as part of a round crown (normal from the crown centre) */
+    const card = (gb, p, cen, yaw, tilt, size, col, sq = 1) => {
+      const t1 = [Math.cos(yaw), 0, Math.sin(yaw)], t2 = [-Math.sin(yaw) * Math.sin(tilt), Math.cos(tilt), Math.cos(yaw) * Math.sin(tilt)];
+      const h = size / 2, hv = size / 2 * sq, P = (a, b) => [p[0] + t1[0] * a + t2[0] * b, p[1] + t1[1] * a + t2[1] * b, p[2] + t1[2] * a + t2[2] * b];
+      const n = norm([(p[0] - cen[0]) * 1.0 + .0, (p[1] - cen[1]) * 1.3 + .9, (p[2] - cen[2]) * 1.0]); const f = R.next() < .5;
+      gb.quad(P(-h, -hv), P(h, -hv), P(h, hv), P(-h, hv), n, f ? [[0, 0], [1, 0], [1, 1], [0, 1]] : [[1, 0], [0, 0], [0, 1], [1, 1]], col);
+    };
+    /** a crown: cards scattered through an ellipsoid (most near its skin), darker underneath and inside */
+    const crown = (gb, cx, cy, cz, rx, ry, rz, n, size, base = [1, 1, 1]) => {
+      for (let i = 0; i < n; i++) { let u, v, w, d; do { u = R.next() * 2 - 1; v = R.next() * 2 - 1; w = R.next() * 2 - 1; d = u * u + v * v + w * w; } while (d > 1 || d < .01);
+        const L = Math.sqrt(d), k = Math.pow(R.next(), .3) / L, p = [cx + u * k * rx, cy + v * k * ry, cz + w * k * rz];
+        const ao = .42 + .58 * clamp((v * k + 1) / 2, 0, 1) * (.55 + .45 * Math.min(1, k * L)); const c = base.map(x => x * ao * (.9 + R.next() * .2));
+        card(gb, p, [cx, cy, cz], R.next() * 6.283, (R.next() - .5) * 1.6, size * (.75 + R.next() * .5), c); }
+    };
+    /** a dense core inside the crown (uv on the leafy centre of the card) so distant trees keep their mass */
+    const core = (gb, cx, cy, cz, r, sy, col) => { const ico = new THREE.IcosahedronGeometry(r, 0), p = ico.attributes.position;
+      for (let i = 0; i < p.count; i += 3) { const v = []; for (let k = 0; k < 3; k++) v.push([cx + p.getX(i + k), cy + p.getY(i + k) * sy, cz + p.getZ(i + k)]); gb.tri(v[0], v[1], v[2], [[.42, .42], [.58, .45], [.5, .58]], col.map(c => c * (.6 + (v[0][1] - cy + r) / (2 * r) * .3))); } ico.dispose(); };
+    const branch = (gb, y0, a, len, rise, r) => { const x1 = Math.cos(a) * len, z1 = Math.sin(a) * len; const steps = 3; for (let s = 0; s < steps; s++) { const t0 = s / steps, t1 = (s + 1) / steps; const p0 = [x1 * t0, y0 + rise * t0, z1 * t0], p1 = [x1 * t1, y0 + rise * t1, z1 * t1], rr0 = r * (1 - t0 * .7), rr1 = r * (1 - t1 * .7);
+      const dx = p1[0] - p0[0], dz = p1[2] - p0[2], dl = Math.hypot(dx, dz) || 1, nx = -dz / dl, nz = dx / dl; gb.quad([p0[0] + nx * rr0, p0[1], p0[2] + nz * rr0], [p1[0] + nx * rr1, p1[1], p1[2] + nz * rr1], [p1[0] - nx * rr1, p1[1] + rr1 * 2, p1[2] - nz * rr1], [p0[0] - nx * rr0, p0[1] + rr0 * 2, p0[2] - nz * rr0], [nx, .3, nz], [[0, t0], [1, t0], [1, t1], [0, t1]], [.9, .9, .9]); } };
+    // Scots pine: tall bare orange trunk, a flat, broken crown of needle sprays high up
+    trunkP.cyl(0, -.5, 0, .22, .14, 14.2, 6, [1, 1, 1], 1.2, 2);
+    core(pine, 0, 12.3, 0, 1.55, 1.3, [.55, .62, .5]);
+    for (let t = 0; t < N(5, 6, 8); t++) { const y = 9.6 + t * (4.6 / N(5, 6, 8)), rad = 2.3 - t * .17, nb = N(3, 4, 5);
+      for (let b = 0; b < nb; b++) { const a = R.next() * 6.283, r0 = rad * (.45 + R.next() * .55), px = Math.cos(a) * r0, pz = Math.sin(a) * r0; branch(trunkP, y - .5, a, r0, .4, .05);
+        for (let c = 0; c < N(2, 3, 4); c++) card(pine, [px + (R.next() - .5) * .8, y + (R.next() - .5) * .5, pz + (R.next() - .5) * .8], [0, y - .8, 0], a + (R.next() - .5) * 1.2, 1.15 + (R.next() - .5) * .5, 1.9 + R.next() * .7, [.92, .95, .9].map(x => x * (.75 + t * .05))); } }
+    card(pine, [0, 14.6, 0], [0, 13, 0], 0, 1.4, 1.6, [1, 1, 1]); card(pine, [0, 14.5, 0], [0, 13, 0], 1.57, 1.4, 1.5, [1, 1, 1]);
+    // broadleaf (oak / lime): stout trunk, four limbs, a lumpy crown of three lobes
+    trunkB.cyl(0, -.5, 0, .34, .22, 6.2, 7, [1, 1, 1], 1.2, 2); for (let b = 0; b < 4; b++) branch(trunkB, 4.4 + b * .35, b * 1.6 + .4, 2.1, 1.8, .11);
+    core(broad, .2, 7.3, 0, 2.6, .85, [.6, .66, .52]);
+    crown(broad, .2, 7.4, 0, 3.4, 2.7, 3.4, N(22, 36, 58), 2.5); crown(broad, -1.5, 6.5, -.9, 2.3, 1.9, 2.3, N(8, 13, 20), 2.2); crown(broad, 1.3, 6.8, 1.1, 2.1, 1.8, 2.1, N(7, 11, 18), 2.1);
+    // birch: slim white trunk, light airy crown
+    trunkW.cyl(0, -.5, 0, .17, .1, 10, 6, [1.7, 1.7, 1.6], 1, 2); for (let b = 0; b < 3; b++) branch(trunkW, 5.5 + b * .9, b * 2.1, 1.4, 1.6, .06);
+    core(birch, 0, 7.8, 0, 1.6, 1.4, [.62, .66, .5]); crown(birch, 0, 7.6, 0, 2.2, 3.0, 2.2, N(16, 26, 42), 1.7);
+    // orchard fruit tree: short trunk, small round crown
+    trunkF.cyl(0, -.3, 0, .14, .1, 2.3, 6, [.8, .7, .6], 1, 2); core(fruit, 0, 2.9, 0, 1.2, .8, [.6, .65, .5]); crown(fruit, 0, 2.9, 0, 1.8, 1.4, 1.8, N(10, 16, 24), 1.4);
+    const leaf = foliageMat('leafCard', q), mats = { pine: foliageMat('needleCard', q), broad: leaf, birch: foliageMat('birchCard', q), fruit: leaf, trunkP: texMat('pinebark', { vc: true, side: THREE.DoubleSide }), trunkB: texMat('bark', { vc: true, side: THREE.DoubleSide }), trunkW: texMat('bark', { vc: true, side: THREE.DoubleSide }), trunkF: texMat('bark', { vc: true, side: THREE.DoubleSide }) };
+    const geos = { pine: pine.build(), broad: broad.build(), birch: birch.build(), fruit: fruit.build(), trunkP: trunkP.build(), trunkB: trunkB.build(), trunkW: trunkW.build(), trunkF: trunkF.build() };
+    const layers = [['pine', 'trunkP'], ['broad', 'trunkB'], ['birch', 'trunkW'], ['fruit', 'trunkF']];
+    const chunk = q >= 2 ? 200 : 260, buckets = new Map();
     for (const t of this.trees) { const key = Math.floor(t.x / chunk) + ',' + Math.floor(t.z / chunk); let b = buckets.get(key); if (!b) buckets.set(key, b = []); b.push(t); }
-    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3(), upv = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
     this.treeChunks = [];
     for (const [, list] of buckets) for (let k = 0; k < 4; k++) {
       const L = list.filter(t => t.k === k); if (!L.length) continue;
-      for (const part of layers[k]) { if (!part) continue; const im = new THREE.InstancedMesh(geos[part], mats[part], L.length); im.castShadow = this.q > 0; im.receiveShadow = true;
-        L.forEach((t, i) => { const s = t.s * (k === 0 ? 1.0 : 1); ps.set(t.x, this.Hraw(t.x, t.z), t.z); q.setFromAxisAngle(up, (t.x * 7.13 + t.z * 3.1) % 6.28); sc.set(s * (.9 + (t.x * 13 % 1) * .2), s, s * (.9 + (t.z * 11 % 1) * .2)); m4.compose(ps, q, sc); im.setMatrixAt(i, m4); });
+      for (const part of layers[k]) { const im = new THREE.InstancedMesh(geos[part], mats[part], L.length); im.castShadow = q > 0; im.receiveShadow = true;
+        L.forEach((t, i) => { const s = t.s; ps.set(t.x, this.Hraw(t.x, t.z), t.z); qq.setFromAxisAngle(upv, (t.x * 7.13 + t.z * 3.1) % 6.28); sc.set(s * (.9 + (t.x * 13 % 1) * .2), s, s * (.9 + (t.z * 11 % 1) * .2)); m4.compose(ps, qq, sc); im.setMatrixAt(i, m4);
+          if (!part.startsWith('trunk')) { const h = Math.abs(Math.sin(t.x * 12.9898 + t.z * 78.233) * 43758.5453) % 1; col.setRGB(.88 + h * .24, .9 + h * .18, .82 + (1 - h) * .2); im.setColorAt(i, col); } });
         im.computeBoundingSphere(); im.userData.cx = L.reduce((a, t) => a + t.x, 0) / L.length; im.userData.cz = L.reduce((a, t) => a + t.z, 0) / L.length; this.group.add(im); this.treeChunks.push(im); }
     }
   }
@@ -450,24 +507,27 @@ export class World {
     if (sand.vc) { const m = new THREE.Mesh(sand.build(), texMat('sandbag', { vc: true })); m.castShadow = m.receiveShadow = true; this.group.add(m); const p = new THREE.Mesh(plank.build(), texMat('planks', { vc: true })); p.receiveShadow = true; this.group.add(p); }
   }
 
-  // ---- sky dome with sun, Mie glow and procedural clouds
+  // ---- sky dome: horizon glow, Mie halo and sun disc, and the cloud deck whose shadows drift across the ground
   buildSky() {
-    const g = new THREE.SphereGeometry(3000, 32, 16);
-    this.skyU = { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunCol: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, cover: { value: .4 }, time: { value: 0 } };
+    const g = new THREE.SphereGeometry(3000, 48, 24);
+    this.skyU = { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunCol: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, cover: { value: .4 }, time: { value: 0 },
+      fwNoise: FOGU.fwNoise, fwTime: FOGU.fwTime, fwWind: FOGU.fwWind, fwCloud: FOGU.fwCloud };
     const m = new THREE.ShaderMaterial({ uniforms: this.skyU, side: THREE.BackSide, depthWrite: false, fog: false,
       vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); vec4 p = modelViewMatrix*vec4(position,1.0); gl_Position = projectionMatrix*p; gl_Position.z = gl_Position.w*0.99999; }',
-      fragmentShader: `uniform vec3 top, hor, sunCol, sunDir; uniform float cover, time; varying vec3 vD;
-float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
-float n(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(h(i),h(i+vec2(1,0)),f.x), mix(h(i+vec2(0,1)),h(i+vec2(1,1)),f.x), f.y); }
-float fbm(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<5;i++){ s+=n(p)*a; p*=2.03; a*=0.5; } return s; }
-void main(){ vec3 d = normalize(vD); float y = max(d.y, 0.0);
- vec3 c = mix(hor, top, pow(y, 0.55)); float sd = max(dot(d, normalize(sunDir)), 0.0);
- c += sunCol * (pow(sd, 900.0)*6.0 + pow(sd, 14.0)*0.35 + pow(sd,3.0)*0.12);
- if (d.y > 0.0) { vec2 uv = d.xz / (d.y + 0.12) * 1.6 + vec2(time*0.004, time*0.0015);
-  float cl = smoothstep(1.0 - cover - 0.15, 1.0 - cover + 0.35, fbm(uv)); float sh = fbm(uv + normalize(sunDir).xz*0.08);
-  vec3 cc = mix(vec3(1.0)*mix(hor, sunCol, 0.35), hor*0.55, smoothstep(0.3, 0.8, sh)); cc += sunCol*pow(sd,8.0)*0.4;
-  c = mix(c, cc, cl * smoothstep(0.0, 0.18, d.y)); }
- c = mix(c, hor*0.85, smoothstep(0.0, -0.2, d.y));
+      fragmentShader: `uniform vec3 top, hor, sunCol, sunDir; uniform float cover, time; uniform sampler2D fwNoise; uniform float fwTime; uniform vec2 fwWind; uniform vec4 fwCloud; varying vec3 vD;
+${CLOUD_GLSL}
+void main(){ vec3 d = normalize(vD); float y = max(d.y, 0.0); vec3 sd = normalize(sunDir); float mu = dot(d, sd), mp = max(mu, 0.0);
+ vec3 c = mix(hor, top, pow(y, 0.5));
+ c += hor * 0.16 * exp(-y * 10.0);                                       // the pale band along the horizon
+ c += sunCol * (pow(mp, 10.0) * 0.30 + pow(mp, 3.0) * 0.09 + pow(mp, 900.0) * 2.5);   // Mie glow round the sun
+ c += sunCol * smoothstep(0.99935, 0.99968, mu) * 7.0;                   // the sun's disc
+ if (d.y > 0.0) { float t = (fwCloud.z - cameraPosition.y) / max(d.y, 0.025); vec2 q = cameraPosition.xz + d.xz * t;
+  float den = fwCloudD(q), toward = fwCloudD(q + sd.xz * 180.0);       // thicker toward the sun: this side is in the cloud's own shade
+  float lit = clamp(1.05 - (toward - den) * 1.7 - den * 0.3, 0.22, 1.15);
+  vec3 shade = hor * 0.55 + top * 0.12, light = sunCol * 0.8 + hor * 0.5;
+  vec3 cc = mix(shade, light, lit); cc += sunCol * pow(mp, 7.0) * (1.0 - den) * 1.4;   // silver lining
+  c = mix(c, cc, den * smoothstep(0.0, 0.14, d.y) * 0.97); }
+ c = mix(c, hor * 0.85, smoothstep(0.0, -0.2, d.y));
  gl_FragColor = vec4(c, 1.0);
  #include <tonemapping_fragment>
  #include <colorspace_fragment>

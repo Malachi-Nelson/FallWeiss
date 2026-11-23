@@ -187,7 +187,7 @@ export class Engine {
   }
   update(x, y, z, speed, dt) {
     if (!this.on) return; const dx = x - listener.x, dz = z - listener.z, d = Math.hypot(dx, dz, y - listener.y);
-    const rpm = .55 + Math.min(1, Math.abs(speed) / 6) * .6, base = this.big ? 31 : 37;
+    const rpm = .55 + Math.min(1, Math.abs(speed) / 4.2) * .6, base = this.big ? 31 : 37;
     this.o1.frequency.value = base * rpm; this.o2.frequency.value = base * rpm * 1.5 + 1.3;
     this.f.frequency.value = Math.max(160, (240 + rpm * 420) / (1 + d / 250));
     this.g.gain.value = .5 * Math.min(1, 14 / Math.max(14, d)) * Math.max(0, 1 - d / 700);

@@ -103,12 +103,46 @@ const GEN = {
     const R = rng(11); for (let i = 0; i < S * S / 10; i++) { const x = R() * S, y = R() * S, a = R() * Math.PI; base.g.strokeStyle = `rgba(${50 + R() * 40},${80 + R() * 40},${40 + R() * 30},.6)`; base.g.lineWidth = .8; base.g.beginPath(); base.g.moveTo(x, y); base.g.lineTo(x + Math.cos(a) * 5, y + Math.sin(a) * 5); base.g.stroke(); }
     heightFromCanvas(base.g, S, base.H, .7); return base; },
   sandbag(S) { return paint(S, (u, v) => { const rows = 4, ry = v * rows, ri = Math.floor(ry), fy = ry - ri, bx = u * 2 + (ri % 2) * .5, fx = bx - Math.floor(bx); const bulge = Math.sin(fy * Math.PI) * Math.sin(fx * Math.PI); const weave = (Math.sin(u * S * 1.4) * Math.sin(v * S * 1.4)) * .5 + .5, n = fbm(u * 8, v * 8, 8, 4);
-    let c = mix(hexc(0x6e624a), hexc(0x9a8a68), n * .7 + weave * .15); c = [c[0] * (.55 + bulge * .55), c[1] * (.55 + bulge * .55), c[2] * (.55 + bulge * .55)]; c = mix(c, hexc(0x4a3c2c), Math.max(0, fbm(u * 3, v * 3, 3, 3) - .6)); return [c[0], c[1], c[2], bulge * .8 + weave * .1]; }); },
+    let c = mix(hexc(0x8a7c5e), hexc(0xb8a67e), n * .7 + weave * .15); c = [c[0] * (.72 + bulge * .4), c[1] * (.72 + bulge * .4), c[2] * (.72 + bulge * .4)]; c = mix(c, hexc(0x4a3c2c), Math.max(0, fbm(u * 3, v * 3, 3, 3) - .6)); return [c[0], c[1], c[2], bulge * .8 + weave * .1]; }); },
   cloth(S) { // grey detail for uniforms / painted steel on the original vertex-coloured models: weave + wear + grime
     return paint(S, (u, v) => { const weave = ((Math.sin(u * S * .9) * Math.sin(v * S * .9)) * .5 + .5), n = fbm(u * 8, v * 8, 8, 5), g = fbm(u * 3 + 4, v * 3, 3, 3); const k = 150 + weave * 25 + n * 60 - Math.max(0, g - .55) * 160; return [k, k, k, weave * .4 + n * .6]; });
   },
   water(S) { return paint(S, (u, v) => { const n = fbm(u * 6, v * 6, 6, 5); return [128, 128, 255, n]; }); },
+  // ---- foliage cards (RGBA, alpha-tested): a clump of leaves or a spray of needles per card
+  leafCard(S, o = {}) {
+    const c = canvas(S), g = c.getContext('2d'), R = rng(o.seed || 21), dark = hexc(o.dark ?? 0x2c3d1c), lite = hexc(o.lite ?? 0x7d8c3c), n = Math.round((o.n || 700) * (S / 256) ** 2 / (S / 256));
+    // a few twigs first, then the leaves over them
+    g.strokeStyle = 'rgba(52,40,28,.9)'; g.lineCap = 'round';
+    for (let i = 0; i < 7; i++) { const a = R() * 6.28, L = S * (.25 + R() * .2); g.lineWidth = S / 180 + R() * S / 220; g.beginPath(); g.moveTo(S / 2, S / 2); g.quadraticCurveTo(S / 2 + Math.cos(a + .3) * L * .5, S / 2 + Math.sin(a + .3) * L * .5, S / 2 + Math.cos(a) * L, S / 2 + Math.sin(a) * L); g.stroke(); }
+    for (let i = 0; i < n; i++) {
+      const a = R() * 6.283, r = Math.pow(R(), .62) * S * .46, x = S / 2 + Math.cos(a) * r, y = S / 2 + Math.sin(a) * r * .92;
+      const len = S * (o.len || .055) * (.65 + R() * .7), wid = len * (o.wid || .52), rot = R() * 6.283, edge = r / (S * .46);
+      const t = Math.min(1, Math.max(0, R() * .85 + (1 - edge) * .1 + (y < S / 2 ? .12 : -.05))); let col = mix(dark, lite, t);
+      if (o.autumn && R() < .08) col = mix(col, hexc(0xb08a2a), .65); if (R() < .05) col = mix(col, hexc(0x9a9a50), .4); // a few yellowing leaves (September)
+      g.save(); g.translate(x, y); g.rotate(rot); g.fillStyle = `rgb(${col[0] | 0},${col[1] | 0},${col[2] | 0})`;
+      g.beginPath(); g.moveTo(-len / 2, 0); g.quadraticCurveTo(0, -wid, len / 2, 0); g.quadraticCurveTo(0, wid, -len / 2, 0); g.fill();
+      g.strokeStyle = `rgba(255,255,210,${.08 + R() * .1})`; g.lineWidth = Math.max(.6, S / 400); g.beginPath(); g.moveTo(-len / 2, 0); g.lineTo(len / 2, 0); g.stroke(); g.restore();
+    }
+    return { c, alpha: true };
+  },
+  needleCard(S, o = {}) {
+    const c = canvas(S), g = c.getContext('2d'), R = rng(o.seed || 33); g.lineCap = 'round';
+    for (let k = 0; k < 9; k++) { // sprays: a twig with needles both sides, drooping toward the card's bottom
+      const a = -Math.PI / 2 + (k - 4) * .32 + (R() - .5) * .2, L = S * (.3 + R() * .14), x0 = S / 2 + (R() - .5) * S * .1, y0 = S * .58 + (R() - .5) * S * .1;
+      g.strokeStyle = 'rgba(70,48,32,.95)'; g.lineWidth = S / 200 + 1; const x1 = x0 + Math.cos(a) * L, y1 = y0 + Math.sin(a) * L * .8 + L * .25; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+      for (let i = 0; i < 70; i++) { const t = .08 + R() * .92, px = x0 + (x1 - x0) * t, py = y0 + (y1 - y0) * t, side = R() < .5 ? -1 : 1, na = a + side * (.9 + R() * .5), nl = S * (.03 + R() * .03) * (1.1 - t * .4);
+        const col = mix(hexc(0x1f3220), hexc(0x52693a), R() * .8 + (1 - t) * .15); g.strokeStyle = `rgb(${col[0] | 0},${col[1] | 0},${col[2] | 0})`; g.lineWidth = Math.max(1, S / 300);
+        g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(na) * nl, py + Math.sin(na) * nl + nl * .25); g.stroke(); }
+    }
+    return { c, alpha: true };
+  },
 };
+/** tileable cloud / variation noise (R: broad fbm, G: finer fbm), linear, shared by the sky, cloud shadows and terrain tint */
+export function noiseTexture(S = 256) {
+  const d = new Uint8Array(S * S * 4);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) { const u = x / S, v = y / S, i = (y * S + x) * 4; const a = fbm(u * 4, v * 4, 4, 6, 2, .55), b = fbm(u * 12 + 3, v * 12, 12, 4); d[i] = Math.max(0, Math.min(255, (a - .5) * 1.9 * 255 + 128)); d[i + 1] = Math.max(0, Math.min(255, (b - .5) * 1.7 * 255 + 128)); d[i + 2] = 128; d[i + 3] = 255; }
+  const t = new THREE.DataTexture(d, S, S, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true; return t;
+}
 function drawWindow(g, S, o) {
   const w = S * .34, h = S * .46, x = (S - w) / 2, y = S * .2; g.fillStyle = o.frame || '#e8e2d0'; g.fillRect(x - S * .03, y - S * .03, w + S * .06, h + S * .08);
   g.fillStyle = '#1c1e20'; g.fillRect(x, y, w, h); const R = rng(Math.floor(S));
@@ -129,14 +163,16 @@ export async function buildTextures(quality, renderer, onStep) {
     ['leaves', S / 2, 4, {}], ['leavesB', S / 2, 4, { gen: 'leaves', dark: 0x2e3a1c, lite: 0x8a9440, autumn: true }],
     ['plasterWin', S / 2, 3, { gen: 'plaster', win: true, shutters: '#3c5a3a' }], ['plasterWinB', S / 2, 3, { gen: 'plaster', win: true, tint: 0xd6c69a, shutters: '#5a3a28' }],
     ['plasterWinC', S / 2, 3, { gen: 'plaster', win: true, tint: 0xc9cfc8 }], ['plaster', S / 2, 3, { gen: 'plaster', tint: 0xd8cdb2 }],
+    ['leafCard', S / 2, 0, { gen: 'leafCard', seed: 21 }], ['birchCard', S / 2, 0, { gen: 'leafCard', seed: 23, dark: 0x3c4a22, lite: 0x9aa64a, len: .045, autumn: true }], ['needleCard', S / 2, 0, { gen: 'needleCard' }],
     ['brickWin', S / 2, 3, { gen: 'brick', win: true }], ['brick', S / 2, 3, { gen: 'brick' }], ['stuccoWin', S / 2, 3, { gen: 'plaster', win: true, tint: 0xb8a68c }],
   ];
   for (let i = 0; i < list.length; i++) {
     const [name, s, str, o] = list[i]; const gen = GEN[(o && o.gen) || name];
     const r = gen(Math.max(64, s | 0), o || {});
-    TEX[name] = { map: tex(r.c, true, aniso), normal: tex(normalFrom(r.H, r.S, str * (r.S / 256)), false, aniso) };
+    TEX[name] = { map: tex(r.c, true, aniso), normal: r.alpha ? null : tex(normalFrom(r.H, r.S, str * (r.S / 256)), false, aniso) };
     if (onStep) onStep((i + 1) / list.length);
     await new Promise(res => setTimeout(res, 0));
   }
+  if (!TEX.noise) TEX.noise = noiseTexture(256);
   return TEX;
 }
