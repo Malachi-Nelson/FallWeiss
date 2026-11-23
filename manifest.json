@@ -1,0 +1,10 @@
+{
+  "name": "Fall Weiss: Poland 1939",
+  "short_name": "Fall Weiss",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#14120e",
+  "theme_color": "#14120e",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
