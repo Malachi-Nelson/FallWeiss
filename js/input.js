@@ -35,17 +35,17 @@ export function initInput(canvas, root) {
   touchUI.innerHTML = `
   <div id="tz-move"></div><div id="tz-look"></div>
   <div id="stick"><div id="knob"></div></div>
-  <button class="tb" id="b-fire" style="right:3%;bottom:20%;width:84px;height:84px">FIRE</button>
-  <button class="tb" id="b-fire2" style="left:3%;top:46%;width:58px;height:58px;opacity:.7">FIRE</button>
-  <button class="tb" id="b-ads" style="right:calc(3% + 96px);bottom:30%">AIM</button>
-  <button class="tb" id="b-reload" style="right:3%;bottom:calc(20% + 96px)">R</button>
-  <button class="tb" id="b-crouch" style="right:calc(3% + 70px);bottom:6%">⤓</button>
-  <button class="tb" id="b-prone" style="right:calc(3% + 140px);bottom:6%">▁</button>
-  <button class="tb" id="b-nade" style="right:calc(3% + 96px);bottom:calc(30% + 70px)">💣</button>
-  <button class="tb" id="b-switch" style="right:3%;bottom:6%">⇄</button>
-  <button class="tb" id="b-band" style="left:calc(50% - 30px);bottom:22%;display:none;background:rgba(150,30,20,.55)">BANDAGE</button>
-  <button class="tb small" id="b-map" style="left:12px;top:12px">MAP</button>
-  <button class="tb small" id="b-pause" style="right:12px;top:12px">❚❚</button>`;
+  <button class="tb" id="b-fire">FIRE</button>
+  <button class="tb" id="b-fire2">FIRE</button>
+  <button class="tb" id="b-ads">AIM</button>
+  <button class="tb" id="b-reload">RELOAD</button>
+  <button class="tb" id="b-crouch">CROUCH</button>
+  <button class="tb" id="b-prone">PRONE</button>
+  <button class="tb" id="b-nade">NADE</button>
+  <button class="tb" id="b-swap">SWAP</button>
+  <button class="tb" id="b-band" style="display:none;background:rgba(150,30,20,.55)">BANDAGE</button>
+  <button class="tb small" id="b-map">MAP</button>
+  <button class="tb small" id="b-pause">❚❚</button>`;
   const stick = touchUI.querySelector('#stick'), knob = touchUI.querySelector('#knob');
   let moveId = null, mox = 0, moy = 0; const looks = new Map(); const R = 56;
   const tz = touchUI.querySelector('#tz-move'), tl = touchUI.querySelector('#tz-look');
@@ -63,13 +63,15 @@ export function initInput(canvas, root) {
   window.addEventListener('touchend', end); window.addEventListener('touchcancel', end);
   // buttons: fire buttons also steer the aim while held (thumb stays on FIRE and drags)
   const btn = (id, down, up, look) => { const b = touchUI.querySelector(id); b.addEventListener('touchstart', e => { isTouchEvent = true; e.preventDefault(); e.stopPropagation(); b.classList.add('on'); down(); if (look) for (const t of e.changedTouches) looks.set(t.identifier, { x: t.clientX, y: t.clientY, el: 'fire' }); }, { passive: false });
-    b.addEventListener('touchend', e => { e.preventDefault(); b.classList.remove('on'); if (up) up(); }, { passive: false }); return b; };
+    const rel = e => { e.preventDefault(); b.classList.remove('on'); if (up) up(); for (const t of e.changedTouches) looks.delete(t.identifier); }; b.addEventListener('touchend', rel, { passive: false }); b.addEventListener('touchcancel', rel, { passive: false }); return b; };
   btn('#b-fire', () => { I.fire = true; I.firePressed = true; }, () => { I.fire = false; }, true);
   btn('#b-fire2', () => { I.fire = true; I.firePressed = true; }, () => { I.fire = false; }, true);
   const adsB = btn('#b-ads', () => { I.adsTap = true; });
   btn('#b-reload', () => { I.reloadTap = true; }); btn('#b-crouch', () => { I.crouchTap = true; }); btn('#b-prone', () => { I.proneTap = true; });
-  btn('#b-nade', () => { I.nadeTap = true; }); btn('#b-switch', () => { I.switchTap = true; }); btn('#b-band', () => { I.bandageTap = true; });
+  btn('#b-nade', () => { I.nadeTap = true; }); btn('#b-swap', () => { I.switchTap = true; }); btn('#b-band', () => { I.bandageTap = true; });
   btn('#b-map', () => { I.mapTap = true; }); btn('#b-pause', () => { I.pauseTap = true; });
-  touchUI.style.display = 'none';
-  return { setBandage(v) { touchUI.querySelector('#b-band').style.display = v ? 'block' : 'none'; }, setAds(v) { adsB.classList.toggle('lit', v); }, setStance(s) { touchUI.querySelector('#b-crouch').classList.toggle('lit', s === 1); touchUI.querySelector('#b-prone').classList.toggle('lit', s === 2); } };
+  touchUI.style.display = 'none'; window.__I = I;
+  // iOS Safari ignores user-scalable=no: stop pinch-zoom and double-tap zoom on the game
+  for (const ev of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(ev, e => { if (e.target.tagName !== 'INPUT') e.preventDefault(); }, { passive: false });
+  return { setSize(sz) { touchUI.classList.toggle('tbS', sz === 'S'); touchUI.classList.toggle('tbL', sz === 'L'); }, setBandage(v) { touchUI.querySelector('#b-band').style.display = v ? 'block' : 'none'; }, setAds(v) { adsB.classList.toggle('lit', v); }, setStance(s) { touchUI.querySelector('#b-crouch').classList.toggle('lit', s === 1); touchUI.querySelector('#b-prone').classList.toggle('lit', s === 2); } };
 }

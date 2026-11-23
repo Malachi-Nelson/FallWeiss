@@ -42,8 +42,15 @@ export class Player {
   update(dt, I) {
     const g = this.g; if (!this.alive) return;
     // look
-    const sens = g.settings.sens * (this.ads ? (this.w.scope ? .25 : .55) : 1);
-    this.yaw -= I.lookX * sens * .0032; this.pitch -= I.lookY * sens * .0032 * (g.settings.invert ? -1 : 1); I.lookX = I.lookY = 0;
+    const sens = g.settings.sens * (this.ads ? (this.w.scope ? .25 : .55) : 1); let lx = I.lookX, ly = I.lookY; I.lookX = I.lookY = 0;
+    // touch aim assist: the view turns more slowly across an enemy near the sights and is drawn gently onto him
+    if (g.touch && g.settings.assist !== false) {
+      this.asT = (this.asT || 0) - dt; if (this.asT <= 0) { this.asT = .15; this.asTgt = this.assistTarget(); }
+      const t = this.asTgt; if (t && t.alive) { const [wy, wp, ang] = this.aimAt(t);
+        if (ang < (this.ads ? .07 : .11)) { lx *= .55; ly *= .55; const pull = (Math.abs(lx) + Math.abs(ly) > .5 || this.speed > .5 ? 1.4 : 0) * dt;
+          this.yaw += clamp(angDiff(this.yaw, wy), -pull, pull) * .5; this.pitch += clamp(wp - this.pitch, -pull, pull) * .5; } }
+    }
+    this.yaw -= lx * sens * .0032; this.pitch -= ly * sens * .0032 * (g.settings.invert ? -1 : 1);
     this.pitch = clamp(this.pitch, this.stance === 2 ? -.5 : -1.45, this.stance === 2 ? .6 : 1.45);
     // stance
     if (I.crouchTap) { this.stance = this.stance === 1 ? 0 : 1; I.crouchTap = false; }
@@ -78,7 +85,7 @@ export class Player {
   }
   weapon(dt, I, sprint) {
     const g = this.g, s = this.slot, w = s.w; this.fireT -= dt; this.switchT -= dt; this.nadeT -= dt;
-    if (I.adsTap) { I.adsTap = false; this.ads = !this.ads; } if (I.adsHold !== undefined && I.adsHold !== null) this.ads = I.adsHold; if (sprint || this.bandT > 0) this.ads = false;
+    if (I.adsTap) { I.adsTap = false; this.ads = !this.ads; if (this.ads && g.touch && g.settings.assist !== false) { const t = this.assistTarget(); if (t) { const [wy, wp, a] = this.aimAt(t); if (a < .14) { this.yaw += angDiff(this.yaw, wy) * .6; this.pitch += (wp - this.pitch) * .6; } } } } if (I.adsHold !== undefined && I.adsHold !== null) this.ads = I.adsHold; if (sprint || this.bandT > 0) this.ads = false;
     this.adsV += ((this.ads ? 1 : 0) - this.adsV) * Math.min(1, dt * (w.scope ? 7 : 10));
     if (I.switchTap && this.reloadT <= 0) { I.switchTap = false; this.cur = (this.cur + 1) % this.slots.length; this.switchT = .6; this.boltT = 0; this.ads = false; SND.mech('switch'); this.buildVM(); }
     if (I.reloadTap) { I.reloadTap = false; if (this.reloadT <= 0 && s.mag < w.clip && s.mags > 0 && this.bandT <= 0) { this.reloadT = w.clipLoad && s.mag > 0 ? w.reload * .75 : w.reload; this.ads = false; SND.mech(w.mg ? 'belt' : w.clipLoad ? 'clip' : 'mag'); } }
@@ -94,6 +101,18 @@ export class Player {
       else this.shoot();
     }
   }
+  /** the enemy nearest the line of the sights (within ~9°, 260 m, in sight), for touch aim assist */
+  assistTarget() {
+    const g = this.g, ey = this.y + this.eyeH(), d0 = this.aimDir(); let best = null, ba = .16;
+    for (const u of g.queryUnits(this.x, this.z, 260, u => u.alive && u.team !== this.team && !u.isPlayer)) {
+      const ty = this.aimHeight(u), dx = u.x - this.x, dy = ty - ey, dz = u.z - this.z, L = Math.hypot(dx, dy, dz); if (L < 2) continue;
+      const a = Math.acos(clamp((dx * d0.x + dy * d0.y + dz * d0.z) / L, -1, 1)); if (a < ba) { ba = a; best = u; } }
+    return best && g.world.los(this.x, ey, this.z, best.x, this.aimHeight(best), best.z) ? best : null;
+  }
+  aimHeight(u) { return u.y + (u.kind === 'tank' ? 1.3 : u.kind === 'cav' ? 1.9 : u.kind === 'gun' ? .8 : u.stance === 2 ? .3 : u.stance === 1 ? .85 : 1.3); }
+  /** yaw and pitch that would put the sights on u, and how far off they are now */
+  aimAt(u) { const dx = u.x - this.x, dz = u.z - this.z, dy = this.aimHeight(u) - (this.y + this.eyeH()), h = Math.hypot(dx, dz), L = Math.hypot(h, dy) || 1, d = this.aimDir();
+    return [Math.atan2(-dx, -dz), Math.atan2(dy, h), Math.acos(clamp((dx * d.x + dy * d.y + dz * d.z) / L, -1, 1))]; }
   aimDir() { E.set(this.pitch + this.kick, this.yaw, 0); return V.set(0, 0, -1).applyEuler(E).clone(); }
   shoot() {
     const g = this.g, s = this.slot, w = s.w; s.mag--; this.fireT = w.rof; if (w.bolt) this.boltT = w.rof; this.lastShotAt = g.time;
@@ -142,7 +161,7 @@ export class Player {
     g.vmCamera.fov = 52 - this.adsV * 8; g.vmCamera.updateProjectionMatrix();
   }
   hurt(dmg, from, part, how) {
-    if (!this.alive || this.g.god) return; const m = part === 'head' ? 2 : part === 'leg' ? .45 : 1; this.hp -= dmg * m * .9; this.g.hud.damage(from, this); SND.playerHurt(); this.supp = 1;
+    if (!this.alive || this.g.god) return; const m = part === 'head' ? 2 : part === 'leg' ? .45 : 1; this.hp -= dmg * m * .9; this.g.hud.damage(from, this); SND.playerHurt(); this.supp = 1; this.g.buzz(dmg > 60 ? 70 : 35);
     if (part !== 'leg' && this.hp > 0) this.bleed = Math.max(this.bleed, 2.2); if (part === 'leg') this.bleed = Math.max(this.bleed, 1.2);
     if (this.hp <= 0) this.die(from, how || (part === 'head' ? 'headshot' : ''));
   }

@@ -50,7 +50,7 @@ export class Unit {
     if (this.kind === 'tank') { this.tdust = 0; }
     this.root.position.set(this.x, this.y, this.z); this.root.rotation.y = this.yaw;
   }
-  dispose() { this.g.scene.remove(this.root); this.stopEngine(); }
+  dispose() { if (this.g.scene) this.g.scene.remove(this.root); this.stopEngine(); }
   stopEngine() { if (this.engine) { this.engine.stop(); this.engine = null; this.g.engines = Math.max(0, this.g.engines - 1); } }
 
   // ---------- hit volumes for real projectiles (player rounds, grenades): [x,y,z,r,part]

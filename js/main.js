@@ -13,6 +13,7 @@ import { SIDE, CLASSES, NAMES, GRENADE, WEAPONS, clamp, lerp, sm, segD, Rng, ang
 import * as SND from './audio.js';
 import { patchScene, patchFog, FOGU, SkyLight, Post, Grass } from './look.js';
 import { TEX as TEXS } from './textures.js';
+import { Planner, allotment, defaultPlace, zoneOf, SPREAD } from './deploy.js';
 const { Audio } = SND;
 
 const $ = s => document.querySelector(s);
@@ -22,7 +23,8 @@ const MV = { rifle: 760, atr: 1275, smg: 380, pistol: 350, lmg: 853, mg34: 755, 
 
 class Game {
   constructor() {
-    this.timers = []; this.planes = []; this.settings = Object.assign({ quality: isTouch() ? 1 : 2, size: isTouch() ? .5 : .8, sens: 1, invert: false, volume: .9, length: 'short', fps: false }, JSON.parse(localStorage.getItem('fw_settings') || '{}'));
+    this.timers = []; this.planes = []; let saved = {}; try { saved = JSON.parse(localStorage.getItem('fw_settings') || '{}'); } catch (e) { }
+    this.settings = Object.assign({ quality: isTouch() ? 1 : 2, size: isTouch() ? .5 : .8, sens: 1, invert: false, volume: .9, length: 'short', fps: false, plan: true, tb: 'M', assist: true, haptics: true }, saved); this.planner = new Planner(this);
     this.touch = isTouch(); this.state = 'menu'; this.side = 0; this.cls = 'rifleman'; const QP = new URLSearchParams(location.search); this.mi = QP.has('m') ? +QP.get('m') : 1; if (QP.has('side')) this.side = +QP.get('side'); this.autoGo = QP.has('go');
     const cv = $('#c'); this.canvas = cv;
     this.renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: this.settings.quality >= 2, powerPreference: 'high-performance' });
@@ -31,7 +33,10 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(70, 1, .08, 3500); this.baseFov = 70; this.camYaw = 0;
     this.vmScene = new THREE.Scene(); this.vmCamera = new THREE.PerspectiveCamera(52, 1, .01, 10);
     this.vmScene.add(this.vmHemi = new THREE.HemisphereLight(0xffffff, 0x554433, 1.4)); this.vmSun = new THREE.DirectionalLight(0xffffff, 2); this.vmSun.position.set(.4, 1, .3); this.vmScene.add(this.vmSun);
-    this.touchUI = initInput(cv, $('#app')); onGesture(() => Audio.init());
+    this.touchUI = initInput(cv, $('#app')); onGesture(() => Audio.init()); this.touchUI.setSize(this.settings.tb); if (this.touch) $('#app').classList.add('touch');
+    // Android's back button pauses the battle instead of leaving the game
+    window.addEventListener('popstate', () => { if (this.inBattle) { if (this.state === 'play') this.pause(true); history.pushState({ fw: 1 }, ''); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && this.inBattle) this.keepAwake(true); });
     this.hud = new Hud(this, $('#app')); this.hud.show(false);
     this.remotes = new Map(); this.netById = new Map(); this.online = new Online(this); this.online.onChange(() => this.renderOnline()); try { this.online.connect(); } catch (e) { console.error(e); }
     window.addEventListener('resize', () => this.resize()); this.resize();
@@ -39,13 +44,23 @@ class Game {
     document.addEventListener('visibilitychange', () => { if (document.hidden && this.state === 'play') this.pause(true); });
     this.menu();
   }
+  get inBattle() { return ['plan', 'deploy', 'play', 'dead', 'paused', 'end'].includes(this.state); }
+  /** phones: keep the screen on while a battle is open (it would dim and lock mid-fight) */
+  async keepAwake(on) { try { if (on && !this.wake && navigator.wakeLock) { this.wake = await navigator.wakeLock.request('screen'); this.wake.addEventListener?.('release', () => { this.wake = null; }); } else if (!on && this.wake) { const w = this.wake; this.wake = null; await w.release(); } } catch (e) { this.wake = null; } }
+  buzz(ms) { if (this.touch && this.settings.haptics !== false && navigator.vibrate) try { navigator.vibrate(ms); } catch (e) { } }
+  /** keep the frame rate up: trade a little resolution for speed when the device cannot keep up, and take it back when it can */
+  adaptRes(raw) {
+    if (this.state !== 'play' || raw <= 0 || raw > .5) return; this.drT = (this.drT || 0) + raw; this.drN = (this.drN || 0) + 1; if (this.drT < 2.5) return;
+    const fps = this.drN / this.drT; this.drT = this.drN = 0; let sc = this.resScale ?? 1;
+    if (fps < 42 && sc > .55) sc = Math.max(.55, sc - .12); else if (fps > 57 && sc < 1) sc = Math.min(1, sc + .06); else return; this.resScale = sc; this.resize();
+  }
   /** the online session while in an online battle (host or client), otherwise null */
   get net() { return this.online && this.online.inBattle ? this.online : null; }
   resize() {
-    const q = this.settings.quality, dpr = Math.min(devicePixelRatio || 1, [1, 1.5, 2][q]) * (this.touch ? [.6, .75, .9][q] : 1);
+    const q = this.settings.quality, dpr = Math.min(devicePixelRatio || 1, [1, 1.5, 2][q]) * (this.touch ? [.6, .75, .9][q] : 1) * (this.resScale ?? 1);
     this.renderer.setPixelRatio(dpr); this.renderer.setSize(innerWidth, innerHeight); this.camera.aspect = this.vmCamera.aspect = innerWidth / innerHeight;
     if (this.post) this.post.resize(); this.baseFov = innerWidth / innerHeight > 1.6 ? 62 : 70; this.camera.fov = this.baseFov; this.camera.updateProjectionMatrix(); this.vmCamera.updateProjectionMatrix(); this.hud.resize(); if (this.fx) this.fx.setScale(innerHeight * dpr);
-    $('#rotate').style.display = this.touch && innerHeight > innerWidth && this.state !== 'menu' ? 'flex' : 'none';
+    const upright = this.touch && innerHeight > innerWidth && this.state !== 'menu'; $('#rotate').style.display = upright ? 'flex' : 'none'; if (upright && this.state === 'play' && !this.net) this.pause(true);
   }
   saveSettings() { try { localStorage.setItem('fw_settings', JSON.stringify(this.settings)); } catch (e) { /* private mode */ } }
   lockPointer() { if (this.touch) return; try { const r = this.canvas.requestPointerLock?.(); if (r && r.catch) r.catch(() => { }); } catch (e) { /* needs a click first */ } }
@@ -55,7 +70,7 @@ class Game {
 
   // ================= menus =================
   async menu() {
-    this.state = 'menu'; setEnabled(false); this.hud.show(false); $('#menu').style.display = 'flex';
+    this.state = 'menu'; setEnabled(false); this.hud.show(false); $('#menu').style.display = 'flex'; this.keepAwake(false); if (this.planner) this.planner.close();
     if (!this.missions) { const D = await (await fetch('data/missions.json')).json(); this.missions = D.missions; }
     const ms = this.missions; $('#ver').textContent = VERSION;
     $('#missions').innerHTML = ms.map((m, i) => `<button class="mis ${i === this.mi ? 'sel' : ''}" data-i="${i}"><b>${m.name}</b><small>${m.date}</small></button>`).join('');
@@ -71,7 +86,13 @@ class Game {
     opt('#o-size', [[.35, 'Skirmish'], [.5, 'Company'], [.8, 'Battalion'], [1, 'Historical']], S.size, v => S.size = +v);
     opt('#o-len', [['short', '15 min'], ['full', 'Historical clock']], S.length, v => S.length = v);
     opt('#o-sens', [[.6, 'Low'], [1, 'Normal'], [1.5, 'High'], [2.2, 'Very high']], S.sens, v => S.sens = +v);
-    $('#start').onclick = () => { Audio.init(); this.start(); }; if (this.autoGo) { this.autoGo = false; this.start(); }
+    opt('#o-plan', [[1, 'Place them myself'], [0, 'Automatic']], S.plan ? 1 : 0, v => S.plan = !!+v);
+    $('#touchopts').style.display = this.touch ? '' : 'none';
+    if (this.touch) { opt('#o-tb', [['S', 'Small'], ['M', 'Normal'], ['L', 'Large']], S.tb, v => { S.tb = v; this.touchUI.setSize(v); }); opt('#o-assist', [[1, 'On'], [0, 'Off']], S.assist ? 1 : 0, v => S.assist = !!+v); }
+    const ios = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), standalone = navigator.standalone || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
+    $('#fsnote').textContent = ios && !standalone ? 'iPhone: Share → Add to Home Screen plays full screen' : ''; $('#fs').style.display = (ios && !standalone) || standalone ? 'none' : '';
+    $('#phelp2').textContent = this.touch ? 'Left thumb: move (push to the edge to run) · Right thumb: look · FIRE (also aims while held) · AIM toggles the sights · RELOAD · CROUCH / PRONE · NADE · SWAP weapon · MAP · ❚❚ pause' : 'Desktop: WASD move · Shift sprint · Mouse aim · LMB fire · RMB aim · C crouch · Z prone · R reload · G grenade · Q switch · B bandage · M map · Esc pause';
+    $('#start').onclick = () => { Audio.init(); this.autoGoNow = false; this.start(); }; if (this.autoGo) { this.autoGo = false; this.autoGoNow = true; this.start(); }
     $('#fs').onclick = () => { const e = document.documentElement; (e.requestFullscreen || e.webkitRequestFullscreen)?.call(e).catch?.(() => { }); screen.orientation?.lock?.('landscape').catch(() => { }); };
     this.renderOnline(); this.drawMenuBackdrop();
   }
@@ -106,23 +127,27 @@ class Game {
   drawMenuBackdrop() { this.renderer.setClearColor(0x14120e); this.renderer.clear(); }
 
   async start() {
-    $('#menu').style.display = 'none'; $('#loading').style.display = 'flex'; this.state = 'loading'; const bar = $('#lbar'), lt = $('#ltext'); this.online.notice = '';
+    $('#menu').style.display = 'none'; $('#loading').style.display = 'flex'; this.state = 'loading'; const bar = $('#lbar'), lt = $('#ltext'); this.online.notice = ''; this.keepAwake(true); if (this.touch && !(history.state && history.state.fw)) history.pushState({ fw: 1 }, '');
     if (this.online.host) this.online.newBattle(); if (!this.missions) { const D = await (await fetch('data/missions.json')).json(); this.missions = D.missions; }
     const step = (t, f) => { lt.textContent = t; bar.style.width = (f * 100).toFixed(0) + '%'; return new Promise(r => setTimeout(r, 0)); };
+    let planning = false;
     try {
       if (!this.modelsLoaded) { await step('Loading soldiers, tanks and guns…', .02); await loadModels('data/models.bin', f => { bar.style.width = (f * 30).toFixed(0) + '%'; }); this.modelsLoaded = true; }
       if (this.texQ !== this.settings.quality) { await step('Painting textures…', .3); await buildTextures(this.settings.quality, this.renderer, f => { bar.style.width = (30 + f * 30).toFixed(0) + '%'; }); this.texQ = this.settings.quality; this.mats = null; }
       FOGU.fwNoise.value = TEXS.noise;
       await step('Building the battlefield…', .62); this.cleanup(); this.setupMission(this.missions[this.mi]);
-      await step('Deploying forces…', .9); this.deployForces();
+      planning = this.settings.plan && !this.net?.client && !this.M.range && !this.autoGoNow;
+      await step('Deploying forces…', .9); if (!planning) this.deployForces(this.autoPlan());
       await step('Lighting the sky…', .96); this.grass = new Grass(this.scene, this.world, this.settings.quality); for (const k in this.mats) patchFog(this.mats[k]); patchScene(this.scene); this.bakeSky(true);
       if (this.post) { this.post.dispose(); this.post = null; } if (this.settings.quality >= 1) { this.post = new Post(this.renderer, this.settings.quality); this.post.resize(); }
       await step('Ready', 1);
       this.renderer.compile(this.scene, this.camera);
     } catch (e) { console.error(e); lt.textContent = 'Error: ' + e.message; return; }
-    $('#loading').style.display = 'none'; this.state = 'deploy'; this.showDeploy(true); if (new URLSearchParams(location.search).has('go')) $('#go').click();
+    $('#loading').style.display = 'none';
+    if (planning) { this.state = 'plan'; this.hud.show(false); this.planner.open((groups, left) => { this.deployForces(groups); this.state = 'deploy'; this.showDeploy(true, left); }); return; }
+    this.state = 'deploy'; this.showDeploy(true); if (this.autoGoNow) $('#go').click();
   }
-  cleanup() { this.remotes = new Map(); this.netById = new Map(); this.timers = []; for (const p of this.planes) p.done = true; this.planes = []; if (this.world) this.world.dispose(); if (this.units) for (const u of this.units) u.dispose(); if (this.player) this.player.dispose(); this.player = null; if (this.fx) this.fx.clear(); this.scene = null; SND.stopAmbience(); this.engines = 0; }
+  cleanup() { this.remotes = new Map(); this.netById = new Map(); this.timers = []; for (const p of this.planes) p.done = true; this.planes = []; if (this.world) { this.world.dispose(); this.world = null; } if (this.units) for (const u of this.units) u.dispose(); this.units = []; this.grenades = []; this.rounds = []; if (this.player) this.player.dispose(); this.player = null; if (this.fx) this.fx.clear(); this.scene = null; SND.stopAmbience(); this.engines = 0; }
 
   // ================= mission =================
   setupMission(MU) {
@@ -173,26 +198,25 @@ class Game {
   // ================= forces =================
   spawnUnit(team, type, x, z, o = {}) { const u = new Unit(this, team, type, x, z, o); this.units.push(u); if (o.squad) o.squad.members.push(u); return u; }
   removeUnit(u, keepVisual) { const i = this.units.indexOf(u); if (i >= 0) this.units.splice(i, 1); if (!keepVisual || true) u.dispose(); }
-  deployForces() {
+  /** both sides at their historical positions (the computer always deploys this way; you can too) */
+  autoPlan() { const g = [...allotment(this, 0), ...allotment(this, 1)]; defaultPlace(this, g, zoneOf(this)); return g; }
+  /** put the placed groups on the field: each becomes a squad spread round where it was put */
+  deployForces(groups) {
     if (this.net?.client) { this.playerSquad = new Squad(this, this.side, 'rifle'); this.squads[this.side].push(this.playerSquad); return; }
-    const M = this.M, w = this.world, S = this.settings.size, def = 1 - M.attacker, R = new Rng(M.seed + 7);
+    const M = this.M, w = this.world, def = 1 - M.attacker, R = new Rng(M.seed + 7);
     const facing = (x, z, tx, tz) => Math.atan2(-(tx - x), -(tz - z));
-    const place = (team, list, isDef) => {
-      for (const f of list) {
-        const n = Math.max(f.type === 'tank' || f.type === 'at' ? 1 : 1, Math.round(f.n * (f.type === 'tank' || f.type === 'at' ? Math.max(.5, S) : S))); if (f.type === 'tank' && n < 1) continue;
-        const anchor = f.loc >= 0 && this.objectives[f.loc] ? this.objectives[f.loc] : null; const sp = anchor ? anchor : M.spawn[team];
-        const sq = new Squad(this, team, f.type); sq.home = anchor ? f.loc : -1; this.squads[team].push(sq);
-        const enemySp = M.spawn[1 - team];
-        for (let i = 0; i < n; i++) {
-          let x, z; const tries = 20;
-          for (let k = 0; k < tries; k++) { const a = R.next() * 6.28, r = Math.sqrt(R.next()) * (anchor ? anchor.r * .9 : f.sp || 20); x = sp.x + Math.cos(a) * r; z = sp.z + Math.sin(a) * r; if (!w.blocked(x, z, 1) && w.waterDepth(x, z) < .3) break; }
-          if (f.type === 'at') { const g = this.spawnUnit(team, 'at', x, z, { squad: sq, yaw: facing(x, z, enemySp.x, enemySp.z) }); for (let c = 0; c < 2; c++) { const cu = this.spawnUnit(team, 'crew', x + (c ? 1.5 : -1.5), z + 1.2, { squad: sq, yaw: g.yaw }); cu.stance = 1; g.crew.push(cu); cu.gun = g; } continue; }
-          this.spawnUnit(team, f.type, x, z, { squad: sq, yaw: facing(x, z, enemySp.x, enemySp.z), leader: i === 0 && f.type === 'rifle' });
-        }
-        if (anchor && isDef) sq.setOrder({ kind: 'defend', x: anchor.x, z: anchor.z, r: anchor.r }); else sq.setOrder({ kind: 'move', x: sp.x, z: sp.z, r: 20 });
+    const nearest = (x, z) => { let bi = 0, bd = 1e9; this.objectives.forEach((o, i) => { const d = Math.hypot(o.x - x, o.z - z); if (d < bd) { bd = d; bi = i; } }); return bi; };
+    for (const gr of groups || []) {
+      if (!gr.placed) continue; const team = gr.team, isDef = team === def, sq = new Squad(this, team, gr.type); this.squads[team].push(sq);
+      const enemySp = M.spawn[1 - team], spread = SPREAD[gr.type] || 8;
+      for (let i = 0; i < gr.n; i++) {
+        let x = gr.x, z = gr.z; for (let k = 0; k < 20; k++) { const a = R.next() * 6.28, r = Math.sqrt(R.next()) * spread; x = gr.x + Math.cos(a) * r; z = gr.z + Math.sin(a) * r; if (!w.blocked(x, z, 1) && w.waterDepth(x, z) < .3) break; }
+        if (gr.type === 'at') { const g = this.spawnUnit(team, 'at', x, z, { squad: sq, yaw: facing(x, z, enemySp.x, enemySp.z) }); for (let c = 0; c < 2; c++) { const cu = this.spawnUnit(team, 'crew', x + (c ? 1.5 : -1.5), z + 1.2, { squad: sq, yaw: g.yaw }); cu.stance = 1; g.crew.push(cu); cu.gun = g; } continue; }
+        this.spawnUnit(team, gr.type, x, z, { squad: sq, yaw: facing(x, z, enemySp.x, enemySp.z), leader: i === 0 && gr.type === 'rifle' });
       }
-    };
-    place(0, M.forces0 || [], def === 0); place(1, M.forces1 || [], def === 1);
+      if (isDef) { sq.home = gr.hold ? nearest(gr.x, gr.z) : gr.loc >= 0 ? gr.loc : nearest(gr.x, gr.z); if (gr.hold) sq.hold = [gr.x, gr.z]; sq.setOrder(this.orderFor(team, sq)); } // defenders you placed hold that ground until the position they guard falls
+      else { sq.home = -1; sq.setOrder({ kind: 'move', x: gr.x, z: gr.z, r: 20 }); }
+    }
     if (M.range) { const s = M.spawn[this.side], t = M.points[0] || { x: s.x, z: s.z - 200 }, dx = t.x - s.x, dz = t.z - s.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L; this.rangeDummies = [];
       for (const d of [10, 25, 50, 100, 200]) for (const off of [-3, 3]) { const x = s.x + ux * d - uz * off, z = s.z + uz * d + ux * off; const u = this.spawnUnit(1 - this.side, 'rifle', x, z, { yaw: Math.atan2(ux, uz) }); u.dummy = true; u.spot = [x, z]; this.rangeDummies.push(u); }
       for (const d of [120, 180]) { const x = s.x + ux * d + uz * 25, z = s.z + uz * d - ux * 25; const u = this.spawnUnit(1 - this.side, 'tank', x, z, { yaw: Math.atan2(-uz, ux) }); u.dummy = true; u.spot = [x, z]; }
@@ -200,15 +224,15 @@ class Game {
     this.playerSquad = new Squad(this, this.side, 'rifle'); this.squads[this.side].push(this.playerSquad);
     this.commander(true);
   }
-  showDeploy(first) {
+  showDeploy(first, left = 0) {
     setEnabled(false); this.hud.show(true); const d = $('#deploy'); d.style.display = 'flex'; const M = this.M;
     const cs = CLASSES.filter(c => c.team === undefined || c.team === this.side);
     const sp = this.spawnPoint(this.side);
     d.innerHTML = `<div class="panel"><h2>${first ? M.name : 'Killed in action'}</h2><p>${first ? `${SIDE[this.side]} — ${this.side === M.attacker ? 'take the positions in order' : 'hold the positions until the clock runs out'}.` : (this.deathMsg || '')}</p>
       <div class="row">${cs.map(c => `<button class="cls ${c.key === this.cls ? 'sel' : ''}" data-k="${c.key}">${c.label}<small>${c.weps[this.side].join(' · ')}</small></button>`).join('')}</div>
-      <p class="small">Reinforcements: ${Math.max(0, this.tickets[this.side])} · Deploying at ${sp.label}${this.net ? ` · Online: ${this.net.host ? 'you are hosting — keep this tab open' : 'playing in ' + esc(this.online.games.get(this.online.gid)?.host || 'the host') + '\'s battle'}` : ''}</p>
+      ${first && left > 0 ? `<p class="small">${left} unit${left === 1 ? '' : 's'} left out of the battle.</p>` : ''}<p class="small">Reinforcements: ${Math.max(0, this.tickets[this.side])} · Deploying at ${sp.label}${this.net ? ` · Online: ${this.net.host ? 'you are hosting — keep this tab open' : 'playing in ' + esc(this.online.games.get(this.online.gid)?.host || 'the host') + '\'s battle'}` : ''}</p>
       <button id="go" class="big">${first ? 'Deploy' : 'Redeploy'}</button> <button id="quit">Quit to menu</button></div>`;
-    d.querySelectorAll('.cls').forEach(b => b.onclick = () => { this.cls = b.dataset.k; this.showDeploy(first); });
+    d.querySelectorAll('.cls').forEach(b => b.onclick = () => { this.cls = b.dataset.k; this.showDeploy(first, left); });
     const go = () => { if (!first && this.redeployT > 0) return; d.style.display = 'none'; this.spawnPlayer(); this.state = 'play'; setEnabled(true); this.lockPointer(); if (first) this.hud.banner(M.name, M.date, 5); };
     d.querySelector('#go').onclick = go; d.querySelector('#quit').onclick = () => this.leaveBattle();
     if (!first) { const b = d.querySelector('#go'); const tick = () => { if (this.redeployT > 0) { b.textContent = `Redeploy in ${Math.ceil(this.redeployT)}`; b.disabled = true; setTimeout(tick, 200); } else { b.textContent = 'Redeploy'; b.disabled = false; } }; tick(); }
@@ -231,7 +255,7 @@ class Game {
     const sq = this.playerSquad; sq.members = sq.members.filter(m => m.alive); const need = this.M.range || this.net?.client ? 0 : Math.max(0, Math.round(5 * Math.max(.6, this.settings.size)) - sq.alive.length);
     for (let i = 0; i < need && this.tickets[this.side] > 0; i++) { const u = this.spawnUnit(this.side, i === 1 ? 'mg' : 'rifle', x + (Math.random() - .5) * 10, z + (Math.random() - .5) * 10, { squad: sq, yaw: p.yaw }); this.tickets[this.side]--; }
     if (this.net?.client) { this.online.life++; this.online.act('sp', this.online.life); }
-    sq.members.push(p); sq.setOrder(this.orderFor(this.side, sq)); this.hud.hint(this.touch ? 'Left: move · Right: look · FIRE · AIM' : 'WASD move · Mouse aim · LMB fire · RMB aim · C/Z stance · R reload · G grenade · M map', 6);
+    sq.members.push(p); sq.setOrder(this.orderFor(this.side, sq)); this.hud.hint(this.touch ? 'Left thumb: move (push to the edge to run) · Right thumb: look · AIM toggles the sights' : 'WASD move · Mouse aim · LMB fire · RMB aim · C/Z stance · R reload · G grenade · M map', 6);
   }
   onPlayerDeath(from, how) {
     this.stats.deaths++; this.deathMsg = from && from.team !== undefined ? `${how === 'crushed' ? 'Crushed by' : how === 'blast' ? 'Blown up by' : 'Killed by'} ${esc(from.name || NAMES[from.team]?.[from.type] || 'the enemy')}${from.kind === 'inf' && !from.human && !from.isRemote && NAMES[from.team]?.[from.type] && from.name !== NAMES[from.team][from.type] ? ` (${NAMES[from.team][from.type]})` : ''}${how === 'headshot' ? ' — headshot' : ''}, ${Math.hypot(from.x - this.player.x, from.z - this.player.z) | 0} m` : how === 'bled out' ? 'Bled to death.' : how === 'blast' ? 'Killed by shellfire.' : how === 'crushed' ? 'Crushed by a tank.' : 'Killed.';
@@ -258,6 +282,7 @@ class Game {
       return { kind: 'attack', x: o.x + px * lane * .6, z: o.z + pz * lane * .6, r: Math.max(10, o.r * .6), run: false };
     }
     // defenders: own home point if still held, otherwise the active objective
+    if (sq.hold && sq.home >= a) return { kind: 'defend', x: sq.hold[0], z: sq.hold[1], r: 12, run: false };
     const home = sq.home >= 0 && sq.home >= a ? this.objectives[sq.home] : o;
     return { kind: 'defend', x: home.x, z: home.z, r: home.r, run: home !== this.objectives[sq.home] };
   }
@@ -444,7 +469,7 @@ class Game {
   whistle(x, y, z, dur) { SND.shellWhistle(x, y, z, dur); this.netFx('wh', [x, y, z, dur], 700); }
   explodeFx(x, y, z, size, ground = true, R) {
     this.fx.explosion(x, y, z, size, ground); SND.explosion(x, y, z, size); this.netFx('bm', [x, y, z, size, ground ? 1 : 0, R || 4 * size]);
-    if (this.player && this.player.alive && Math.hypot(this.player.x - x, this.player.z - z) < 60) this.shake = Math.min(1.5, (this.shake || 0) + .4);
+    if (this.player && this.player.alive) { const d = Math.hypot(this.player.x - x, this.player.z - z); if (d < 60) this.shake = Math.min(1.5, (this.shake || 0) + .4); if (d < 30) this.buzz(d < 12 ? 90 : 40); }
   }
   impactFx(x, y, z, mat, send = true) { this.fx.impact(x, y, z, mat); SND.impact(x, y, z, mat); if (send) this.netFx('im', [x, y, z, MATS.indexOf(mat)], 160); }
   /** an AI rifle / MG round: report, muzzle flash, tracer, the crack as it passes the player, and where it struck */
@@ -592,7 +617,7 @@ class Game {
 
   // ================= frame =================
   frame() {
-    let dt = Math.min(.05, this.clock.getDelta()); try { this.online.tick(performance.now()); } catch (e) { console.error(e); } if (!this.scene || this.state === 'loading') { return; }
+    const raw = this.clock.getDelta(); let dt = Math.min(.05, raw); this.adaptRes(raw); try { this.online.tick(performance.now()); } catch (e) { console.error(e); } if (!this.scene || this.state === 'loading' || this.state === 'plan') { return; }
     if (I.pauseTap) { I.pauseTap = false; if (this.state === 'play') this.pause(true); else if (this.state === 'paused') this.pause(false); }
     if (I.mapTap) { I.mapTap = false; this.hud.toggleMap(); }
     const live = this.state === 'play' || this.state === 'dead' || this.state === 'deploy' || this.state === 'end';
@@ -624,7 +649,7 @@ class Game {
     r.render(this.scene, cam);
     if (this.player && this.player.alive && this.state !== 'dead') { r.clearDepth(); r.render(this.vmScene, this.vmCamera); }
     if (P) P.end();
-    if (this.settings.fps) { this.fpsA.push(dt); if (this.fpsA.length > 30) this.fpsA.shift(); $('#fps').textContent = (30 / this.fpsA.reduce((a, b) => a + b, 0)).toFixed(0) + ' fps · ' + r.info.render.calls + ' calls'; }
+    if (this.settings.fps) { this.fpsA.push(dt); if (this.fpsA.length > 30) this.fpsA.shift(); $('#fps').textContent = (30 / this.fpsA.reduce((a, b) => a + b, 0)).toFixed(0) + ' fps · ' + r.info.render.calls + ' calls · res ' + Math.round((this.resScale ?? 1) * 100) + '%'; }
   }
   logic(dt) {
       if (this.net?.client) return this.clientLogic(dt);
