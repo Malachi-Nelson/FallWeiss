@@ -9,7 +9,7 @@
 <link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg">
 <style>
 :root{--ink:#e9e2cf;--dim:#a99f86;--acc:#c9a24a;--bg:rgba(18,16,12,.86);--line:rgba(201,162,74,.35)}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 html,body{margin:0;height:100%;overflow:hidden;background:#14120e;color:var(--ink);font-family:Georgia,'Times New Roman',serif;touch-action:none;overscroll-behavior:none}
 #app{position:fixed;inset:0}
 canvas#c{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -35,7 +35,29 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
 #online .game{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding:7px 0}
 #online .game small{display:block;color:var(--dim);font-size:11px;margin-top:2px}
 #on-games{margin:4px 0}
-@media (max-width:760px),(max-height:500px){.mwrap{grid-template-columns:1fr;padding:10px}#missions{flex-direction:row;flex-wrap:wrap}#missions .mis{flex:1 1 30%}#brief p{font-size:13px;max-height:110px;overflow:auto}}
+@media (max-width:760px),(max-height:500px){.mwrap{grid-template-columns:1fr;padding:10px 10px 78px}#missions{flex-direction:row;flex-wrap:wrap}#missions .mis{flex:1 1 30%}#brief p{font-size:13px;max-height:110px;overflow:auto}
+ #startrow{position:fixed;left:0;right:0;bottom:0;margin:0!important;z-index:3;justify-content:flex-end;align-items:center;padding:10px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));background:linear-gradient(180deg,rgba(20,18,14,0),rgba(20,18,14,.96) 35%)}}
+/* phones held sideways: battles in a column on the left, everything else on the right, the start button always on screen */
+@media (max-height:500px) and (min-width:560px){#menu{align-items:stretch}.mwrap{grid-template-columns:minmax(210px,33%) 1fr;gap:10px;padding:8px calc(12px + env(safe-area-inset-right)) 78px calc(12px + env(safe-area-inset-left))}
+ .mwrap h1{font-size:22px}.mwrap h1 span{font-size:10px;letter-spacing:.22em;margin-top:2px}#missions{flex-direction:column;flex-wrap:nowrap}#missions .mis{flex:none;padding:6px 10px}#missions .mis b{font-size:13px}#missions .mis small{font-size:10px}
+ .card{padding:10px}.lab{margin-top:7px;font-size:10px}#brief h2{font-size:18px}#brief p{font-size:12px;max-height:64px}.row button{padding:6px 10px;font-size:13px}button.big{font-size:16px;padding:10px 22px}}
+#fsnote{font-size:11px;color:var(--dim);max-width:220px}
+/* deployment planner */
+#plan{background:#14120e;align-items:stretch;padding:calc(6px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left))}
+.pwrap{display:flex;gap:12px;width:100%;height:100%;max-width:1300px;margin:0 auto}
+.pside{flex:0 0 min(340px,42%);display:flex;flex-direction:column;gap:6px;min-height:0}
+.pside h2{margin:4px 0 0;font-weight:normal;font-size:20px}.pside p{margin:0;line-height:1.35}
+#plist{display:flex;flex-direction:column;gap:5px;overflow:auto;min-height:50px;flex:1;padding-right:2px}
+#plist .pc{text-align:left;display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:13px;flex:none}
+#plist .pc small{margin:0 0 0 auto;font-size:11px;white-space:nowrap}#plist .pc.on small{color:#9fd08a}
+#plist .pc.sel{background:rgba(120,90,30,.85);border-color:var(--acc)}
+#plist .gl{display:inline-flex;min-width:28px;height:20px;align-items:center;justify-content:center;border-radius:4px;background:#cdbf94;color:#111;font:700 11px system-ui}
+.pside .row{margin:0}.pmapbox{flex:1;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0}
+#pmap{border:1px solid var(--line);border-radius:6px;touch-action:none;cursor:crosshair;display:block}
+#pmsg{color:#f3d58a;min-height:1.2em}
+@media (max-height:500px){.pside h2{font-size:15px}.pside p{font-size:11px}#plist .pc{padding:5px 8px;font-size:12px}.pside button{padding:6px 9px;font-size:12px}.pside button.big{font-size:15px;padding:8px 16px}}
+/* panels scroll instead of being cut off on short screens */
+#deploy,#pause{align-items:flex-start;overflow:auto}#deploy .panel,#pause .panel{margin:auto}
 #loading{background:#14120e;flex-direction:column;gap:14px}
 #lbox{width:min(420px,80vw);height:6px;background:#2a261e;border-radius:3px;overflow:hidden}#lbar{height:100%;width:0;background:var(--acc);transition:width .2s}
 #deploy,#pause{background:rgba(10,9,7,.55)}
@@ -84,6 +106,25 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
 .tb.small{width:auto;height:34px;border-radius:6px;padding:0 12px;font-size:12px}
 .tb.on{background:rgba(201,162,74,.55)}.tb.lit{border-color:var(--acc);box-shadow:0 0 6px var(--acc)}
 #b-fire{font-size:15px;background:rgba(120,30,20,.45)}
+/* touch layout, sized by --tb (Touch buttons: Small / Normal / Large) */
+#touch{--tb:62px;--g:10px;--mr:max(3%,calc(8px + env(safe-area-inset-right)));--ml:max(3%,calc(8px + env(safe-area-inset-left)));--mb:max(4%,calc(6px + env(safe-area-inset-bottom)))}
+#touch.tbS{--tb:52px;--g:8px}#touch.tbL{--tb:74px;--g:12px}
+#touch .tb{width:var(--tb);height:var(--tb);font:700 11px system-ui;letter-spacing:.03em}#touch .tb.small{width:auto;height:34px;font-size:12px;border-radius:6px;padding:0 12px}
+#b-swap{right:var(--mr);bottom:var(--mb)}
+#b-crouch{right:calc(var(--mr) + var(--tb) + var(--g));bottom:var(--mb)}
+#b-prone{right:calc(var(--mr) + 2 * (var(--tb) + var(--g)));bottom:var(--mb)}
+#touch #b-fire{width:calc(var(--tb) * 1.4);height:calc(var(--tb) * 1.4);right:var(--mr);bottom:calc(var(--mb) + var(--tb) + 12px);font-size:15px}
+#b-ads{right:calc(var(--mr) + var(--tb) * 1.4 + 12px);bottom:calc(var(--mb) + var(--tb) * 1.2 + 12px)}
+#b-reload{right:calc(var(--mr) + var(--tb) * .2);bottom:calc(var(--mb) + var(--tb) * 2.4 + 24px)}
+#b-nade{right:calc(var(--mr) + var(--tb) * 1.4 + 12px);bottom:calc(var(--mb) + var(--tb) * 2.4 + 24px)}
+#touch #b-fire2{left:var(--ml);top:38%;width:calc(var(--tb) * .9);height:calc(var(--tb) * .9);opacity:.7}
+#touch #b-band{left:calc(50% - var(--tb));bottom:24%;width:auto;height:calc(var(--tb) * .7);border-radius:8px;padding:0 14px}
+#b-map{left:calc(12px + env(safe-area-inset-left));top:calc(10px + env(safe-area-inset-top))}
+#b-pause{right:calc(12px + env(safe-area-inset-right));top:calc(10px + env(safe-area-inset-top))}
+/* on touch the ammo count sits top right, clear of the thumbs */
+.touch #ammo{top:calc(52px + env(safe-area-inset-top));bottom:auto;right:calc(14px + env(safe-area-inset-right))}
+.touch #feed{top:calc(118px + env(safe-area-inset-top))}
+.touch #status{left:calc(14px + env(safe-area-inset-left));bottom:calc(10px + env(safe-area-inset-bottom))}
 @media (max-height:420px){#mini{width:90px;height:90px}#compass{display:none}#clock{top:42px}}
 </style>
 </head>
@@ -102,8 +143,10 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
           <div class="lab">Graphics</div><div id="o-q" class="row"></div>
           <div class="lab">Battle size</div><div id="o-size" class="row"></div>
           <div class="lab">Round length</div><div id="o-len" class="row"></div>
+          <div class="lab">Your troops</div><div id="o-plan" class="row"></div>
           <div class="lab">Look sensitivity</div><div id="o-sens" class="row"></div>
-          <div class="row" style="margin-top:14px"><button id="start" class="big">To the front</button><button id="fs">Full screen</button></div>
+          <div id="touchopts"><div class="lab">Touch buttons</div><div id="o-tb" class="row"></div><div class="lab">Aim assist</div><div id="o-assist" class="row"></div></div>
+          <div class="row" id="startrow" style="margin-top:14px"><span id="fsnote"></span><button id="fs">Full screen</button><button id="start" class="big">To the front</button></div>
           <div id="ver"></div>
         </div>
         <div class="card" id="online" style="margin-top:10px"></div>
@@ -111,10 +154,11 @@ button.big{font-size:18px;padding:12px 28px;background:#7a5a1e;border-color:var(
     </div>
   </div>
   <div id="loading" class="screen"><div style="letter-spacing:.2em;color:var(--acc)">FALL WEISS</div><div id="lbox"><div id="lbar"></div></div><div id="ltext" style="font-size:13px;color:var(--dim)"></div></div>
+  <div id="plan" class="screen"></div>
   <div id="deploy" class="screen"></div>
   <div id="pause" class="screen"><div class="panel"><h2>Paused</h2>
     <div class="row"><label>Volume <input id="pvol" type="range" min="0" max="1.5" step=".05" value=".9"></label> <label><input id="pfps" type="checkbox"> FPS</label></div>
-    <p class="small">Desktop: WASD move · Shift sprint · Mouse aim · LMB fire · RMB aim · C crouch · Z prone · R reload · G grenade · Q switch · B bandage · M map · Esc pause</p>
+    <p class="small" id="phelp2">Desktop: WASD move · Shift sprint · Mouse aim · LMB fire · RMB aim · C crouch · Z prone · R reload · G grenade · Q switch · B bandage · M map · Esc pause</p>
     <div class="row"><button id="resume" class="big">Resume</button><button id="pmenu">Quit to menu</button></div></div></div>
   <div id="rotate"><div>📱</div>Turn your phone sideways to fight.</div>
   <div id="fps"></div>

@@ -17,7 +17,7 @@ export const FAKE_MQTT = `window.__fakeMsgs = 0; window.mqtt = { connect(url, op
   setTimeout(() => emit('connect'), 30); return c; } };`;
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--autoplay-policy=no-user-gesture-required'] });
 const ctx = await b.newContext({ viewport: { width: 400, height: 225 } });
-await ctx.addInitScript(`localStorage.setItem('fw_settings', JSON.stringify({ quality: 0, size: 0.35, length: 'short' })); window.MQ_SERVERS = ['wss://relay-a.test/mqtt', 'wss://relay-b.test/mqtt'];`);
+await ctx.addInitScript(`localStorage.setItem('fw_settings', JSON.stringify({ quality: 0, size: 0.35, length: 'short', plan: true })); window.MQ_SERVERS = ['wss://relay-a.test/mqtt', 'wss://relay-b.test/mqtt'];`);
 const errs = [];
 async function open(tag) {
   const p = await ctx.newPage();
@@ -34,7 +34,9 @@ await sleep(800);
 log('relay status', await Promise.all([A, B].map(p => p.evaluate(() => FW.online.status()))));
 // A hosts Mokra as the Wehrmacht
 await A.evaluate(mi => { FW.online.setName('Alice'); FW.mi = mi; FW.side = 0; FW.online.hostBattle(); FW.start(); }, MI);
-await A.waitForFunction(() => FW.state === 'deploy', null, { timeout: 120000 }); await A.click('#go'); await A.waitForFunction(() => FW.state === 'play');
+await A.waitForFunction(() => FW.state === 'deploy' || FW.state === 'plan', null, { timeout: 120000 });
+if (await A.evaluate(() => FW.state === 'plan')) await A.evaluate(() => { document.querySelector('#pauto').click(); document.querySelector('#pstart').click(); }); // the host places the troops (Auto-deploy)
+await A.waitForFunction(() => FW.state === 'deploy'); await A.evaluate(() => document.querySelector('#go').click()); await A.waitForFunction(() => FW.state === 'play');
 // B sees it in the lobby and joins as the Polish Army
 await B.waitForFunction(() => FW.online.openGames().length > 0, null, { timeout: 20000 });
 const listed = await B.evaluate(() => { FW.side = 1; FW.renderOnline(); return { games: FW.online.openGames().map(g => ({ mi: g.mi, host: g.host, n: g.n })), html: document.querySelector('#on-games').textContent.slice(0, 120) }; });
@@ -44,7 +46,7 @@ await B.waitForFunction(() => FW.state === 'deploy', null, { timeout: 120000 });
 await sleep(1500);
 const mirror = await Promise.all([A.evaluate(() => FW.units.length), B.evaluate(() => ({ units: FW.units.length, net: FW.units.filter(u => u.net).length, mi: FW.mi, tickets: FW.tickets, ao: FW.activeObj }))]);
 check('B mirrors the host battlefield (same mission, units)', mirror[1].mi === MI && Math.abs(mirror[1].units - (mirror[0] + 1)) <= 2 && mirror[1].net === mirror[1].units, mirror);
-await B.click('#go'); await B.waitForFunction(() => FW.state === 'play');
+await B.evaluate(() => document.querySelector('#go').click()); await B.waitForFunction(() => FW.state === 'play');
 await sleep(2500);
 const seen = await A.evaluate(() => { const rp = [...FW.remotes.values()][0]; return rp ? { name: rp.name, team: rp.team, alive: rp.alive, x: rp.x | 0, z: rp.z | 0, inUnits: FW.units.includes(rp) } : null; });
 const bpos = await B.evaluate(() => ({ x: FW.player.x | 0, z: FW.player.z | 0, team: FW.player.team }));
@@ -93,7 +95,7 @@ check('The host sees Bob fall', aSees.alive === false, aSees);
 // grenade from B after redeploying
 await B.evaluate(() => { FW.time += 2; FW.runTimers(); FW.redeployT = 0; }); // software rendering is slow: skip the 6 s redeploy wait
 await B.waitForFunction(() => document.querySelector('#deploy').style.display === 'flex' && !document.querySelector('#go').disabled, null, { timeout: 30000 });
-await B.click('#go'); await B.waitForFunction(() => FW.state === 'play');
+await B.evaluate(() => document.querySelector('#go').click()); await B.waitForFunction(() => FW.state === 'play');
 await sleep(2000);
 const life = await A.evaluate(() => { const rp = [...FW.remotes.values()][0]; return { life: rp?.life, alive: rp?.alive, units: FW.units.filter(u => u.isRemote).length }; });
 check('Bob redeploys and the host makes him a new soldier', life.alive === true && life.life === 2, life);
