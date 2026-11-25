@@ -170,7 +170,7 @@ export class World {
     this.planBuildings(R); this.planTrees(R);
     this.bakeHeights();
     for (const b of this.obst) { b.y0 = this.Hraw((b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2) - .3; b.y1 = b.y0 + .3 + b.h; }
-    this.buildTerrain(); this.buildWater(); this.buildBuildingMeshes(); this.buildTrees(); this.buildSegs(); this.buildProps(R); this.buildRails(); this.buildTrenchDressing(); this.buildSky();
+    this.buildTerrain(); this.buildWater(); this.buildBuildingMeshes(); this.buildTrees(); this.buildSegs(); this.buildProps(R); this.buildRails(); this.buildTrenchDressing(); this.mergeStatic(); this.buildSky();
     for (const b of this.obst) this.gridAdd(this.ogrid, b, 20);
   }
   // ---- coordinate helpers (game ↔ unity)
@@ -409,18 +409,24 @@ export class World {
     trunkF.cyl(0, -.3, 0, .14, .1, 2.3, 6, [.8, .7, .6], 1, 2); core(fruit, 0, 2.9, 0, 1.2, .8, [.6, .65, .5]); crown(fruit, 0, 2.9, 0, 1.8, 1.4, 1.8, N(10, 16, 24), 1.4);
     const leaf = foliageMat('leafCard', q), mats = { pine: foliageMat('needleCard', q), broad: leaf, birch: foliageMat('birchCard', q), fruit: leaf, trunkP: texMat('pinebark', { vc: true, side: THREE.DoubleSide }), trunkB: texMat('bark', { vc: true, side: THREE.DoubleSide }), trunkW: texMat('bark', { vc: true, side: THREE.DoubleSide }), trunkF: texMat('bark', { vc: true, side: THREE.DoubleSide }) };
     const geos = { pine: pine.build(), broad: broad.build(), birch: birch.build(), fruit: fruit.build(), trunkP: trunkP.build(), trunkB: trunkB.build(), trunkW: trunkW.build(), trunkF: trunkF.build() };
-    const layers = [['pine', 'trunkP'], ['broad', 'trunkB'], ['birch', 'trunkW'], ['fruit', 'trunkF']];
-    const chunk = q >= 2 ? 200 : 260, buckets = new Map();
-    for (const t of this.trees) { const key = Math.floor(t.x / chunk) + ',' + Math.floor(t.z / chunk); let b = buckets.get(key); if (!b) buckets.set(key, b = []); b.push(t); }
-    const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3(), upv = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
-    this.treeChunks = [];
-    for (const [, list] of buckets) for (let k = 0; k < 4; k++) {
-      const L = list.filter(t => t.k === k); if (!L.length) continue;
-      for (const part of layers[k]) { const im = new THREE.InstancedMesh(geos[part], mats[part], L.length); im.castShadow = q > 0; im.receiveShadow = true;
-        L.forEach((t, i) => { const s = t.s; ps.set(t.x, this.Hraw(t.x, t.z), t.z); qq.setFromAxisAngle(upv, (t.x * 7.13 + t.z * 3.1) % 6.28); sc.set(s * (.9 + (t.x * 13 % 1) * .2), s, s * (.9 + (t.z * 11 % 1) * .2)); m4.compose(ps, qq, sc); im.setMatrixAt(i, m4);
-          if (!part.startsWith('trunk')) { const h = Math.abs(Math.sin(t.x * 12.9898 + t.z * 78.233) * 43758.5453) % 1; col.setRGB(.88 + h * .24, .9 + h * .18, .82 + (1 - h) * .2); im.setColorAt(i, col); } });
-        im.computeBoundingSphere(); im.userData.cx = L.reduce((a, t) => a + t.x, 0) / L.length; im.userData.cz = L.reduce((a, t) => a + t.z, 0) / L.length; this.group.add(im); this.treeChunks.push(im); }
-    }
+    // far LOD (phone pass): the same crown read from beyond ~60 m is a dense core plus a few big cards, ~1/6 of the triangles
+    const fp = new GB(), fb = new GB(), fw = new GB(), ff = new GB(), ftP = new GB(), ftB = new GB(), ftW = new GB(), ftF = new GB();
+    core(fp, 0, 12.3, 0, 1.9, 1.25, [.55, .62, .5]); for (let c = 0; c < 7; c++) { const a = c * .9, r0 = 1.4; card(fp, [Math.cos(a) * r0, 10.6 + (c % 3) * 1.4, Math.sin(a) * r0], [0, 10.5, 0], a, 1.2, 3.4, [.9, .93, .88]); }
+    core(fb, .2, 7.3, 0, 3.0, .85, [.6, .66, .52]); crown(fb, .2, 7.4, 0, 3.4, 2.7, 3.4, 12, 3.6);
+    core(fw, 0, 7.8, 0, 1.9, 1.4, [.62, .66, .5]); crown(fw, 0, 7.6, 0, 2.2, 3.0, 2.2, 8, 2.6);
+    core(ff, 0, 2.9, 0, 1.5, .8, [.6, .65, .5]); crown(ff, 0, 2.9, 0, 1.8, 1.4, 1.8, 5, 2.2);
+    ftP.cyl(0, -.5, 0, .22, .14, 14.2, 4, [1, 1, 1], 1.2, 2); ftB.cyl(0, -.5, 0, .34, .22, 6.2, 4, [1, 1, 1], 1.2, 2); ftW.cyl(0, -.5, 0, .17, .1, 10, 4, [1.7, 1.7, 1.6], 1, 2); ftF.cyl(0, -.3, 0, .14, .1, 2.3, 4, [.8, .7, .6], 1, 2);
+    const fgeo = [[fp.build(), ftP.build()], [fb.build(), ftB.build()], [fw.build(), ftW.build()], [ff.build(), ftF.build()]];
+    const near = [['pine', 'trunkP'], ['broad', 'trunkB'], ['birch', 'trunkW'], ['fruit', 'trunkF']];
+    // per-tree matrix and tint, computed once; four kinds × (near crown, near trunk, far crown, far trunk) instanced meshes, refilled
+    // a few times a second with only the trees in front of the camera (one draw call per layer instead of one per chunk)
+    const n = this.trees.length, M = new Float32Array(n * 16), C = new Float32Array(n * 3), m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3(), upv = new THREE.Vector3(0, 1, 0);
+    this.trees.forEach((t, i) => { const s = t.s; ps.set(t.x, this.Hraw(t.x, t.z), t.z); qq.setFromAxisAngle(upv, (t.x * 7.13 + t.z * 3.1) % 6.28); sc.set(s * (.9 + (t.x * 13 % 1) * .2), s, s * (.9 + (t.z * 11 % 1) * .2)); m4.compose(ps, qq, sc); m4.toArray(M, i * 16);
+      const h = Math.abs(Math.sin(t.x * 12.9898 + t.z * 78.233) * 43758.5453) % 1; C[i * 3] = .88 + h * .24; C[i * 3 + 1] = .9 + h * .18; C[i * 3 + 2] = .82 + (1 - h) * .2; });
+    this.treeM = M; this.treeC = C; this.treeLod = []; const cnt = [0, 0, 0, 0]; for (const t of this.trees) cnt[t.k]++;
+    for (let k = 0; k < 4; k++) { if (!cnt[k]) continue; const mk = (geo, mat, crown, shadow) => { const im = new THREE.InstancedMesh(geo, mat, cnt[k]); im.count = 0; im.frustumCulled = false; im.castShadow = shadow; im.receiveShadow = true; if (crown) im.setColorAt(0, new THREE.Color(1, 1, 1)); this.group.add(im); return im; };
+      this.treeLod[k] = { nc: mk(geos[near[k][0]], mats[near[k][0]], true, q > 0), nt: mk(geos[near[k][1]], mats[near[k][1]], false, q > 0), fc: mk(fgeo[k][0], mats[near[k][0]], true, false), ft: mk(fgeo[k][1], mats[near[k][1]], false, false) }; }
+    this.treeChunks = []; this.treeNear = [40, 60, 95][q] ?? 60; this.treeCam = null;
   }
 
   // ---- fences, hedges, walls, telegraph lines, lamps, piers
@@ -536,7 +542,40 @@ void main(){ vec3 d = normalize(vD); float y = max(d.y, 0.0); vec3 sd = normaliz
   }
 
   /** hide tree chunks past `dist` (fog hides them anyway) */
-  cullTrees(cx, cz, dist) { for (const im of this.treeChunks) { const d = Math.hypot(im.userData.cx - cx, im.userData.cz - cz); im.visible = d < dist + 90; } }
+  /** Phone pass: bake every small static mesh in the world (props, landmarks, sandbags, wire, wrecks, carts…) into one mesh per
+   *  material, so a battlefield's clutter costs a handful of draw calls instead of dozens. Terrain, water and instanced trees are left alone. */
+  mergeStatic() {
+    this.group.updateMatrixWorld(true); const groups = new Map(), drop = [];
+    this.group.traverse(o => { if (!o.isMesh || o.isInstancedMesh || o.isSkinnedMesh) return; const g = o.geometry, a = g.attributes; if (!a.position || a.position.count > 30000 || a.splat || o.material === this.waterMat || Array.isArray(o.material)) return;
+      const sig = Object.keys(a).sort().filter(k => k === 'position' || k === 'normal' || k === 'color' || k === 'uv'); if (!sig.includes('normal')) return;
+      const key = o.material.uuid + '|' + sig.join(',') + '|' + o.castShadow + o.receiveShadow; let L = groups.get(key); if (!L) groups.set(key, L = { mat: o.material, sig, cs: o.castShadow, rs: o.receiveShadow, list: [] }); L.list.push(o); });
+    const nm = new THREE.Matrix3(), v = new THREE.Vector3();
+    for (const L of groups.values()) { if (L.list.length < 2) continue; let vc = 0, ic = 0; for (const o of L.list) { vc += o.geometry.attributes.position.count; ic += o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; }
+      const out = {}; for (const k of L.sig) out[k] = new Float32Array(vc * (k === 'uv' ? 2 : 3)); const I = vc > 65535 ? new Uint32Array(ic) : new Uint16Array(ic); let vo = 0, io = 0;
+      for (const o of L.list) { const g = o.geometry, n = g.attributes.position.count, M = o.matrixWorld; nm.getNormalMatrix(M);
+        for (const k of L.sig) { const src = g.attributes[k], dst = out[k], sz = k === 'uv' ? 2 : 3; for (let i = 0; i < n; i++) {
+          if (k === 'position') { v.fromBufferAttribute(src, i).applyMatrix4(M); dst[(vo + i) * 3] = v.x; dst[(vo + i) * 3 + 1] = v.y; dst[(vo + i) * 3 + 2] = v.z; }
+          else if (k === 'normal') { v.fromBufferAttribute(src, i).applyMatrix3(nm).normalize(); dst[(vo + i) * 3] = v.x; dst[(vo + i) * 3 + 1] = v.y; dst[(vo + i) * 3 + 2] = v.z; }
+          else for (let c = 0; c < sz; c++) dst[(vo + i) * sz + c] = c === 0 ? src.getX(i) : c === 1 ? src.getY(i) : src.getZ(i); } }
+        if (g.index) { const ix = g.index.array; for (let i = 0; i < ix.length; i++) I[io + i] = ix[i] + vo; io += ix.length; } else { for (let i = 0; i < n; i++) I[io + i] = vo + i; io += n; }
+        vo += n; drop.push(o); }
+      const geo = new THREE.BufferGeometry(); for (const k of L.sig) geo.setAttribute(k, new THREE.BufferAttribute(out[k], k === 'uv' ? 2 : 3)); geo.setIndex(new THREE.BufferAttribute(I, 1)); geo.computeBoundingSphere();
+      const m = new THREE.Mesh(geo, L.mat); m.castShadow = L.cs; m.receiveShadow = L.rs; m.name = 'merged'; this.group.add(m); }
+    for (const o of drop) { o.parent.remove(o); }
+    this.merged = drop.length;
+  }
+  /** refill the tree layers: near trees at full detail, far ones as the light LOD, none behind the camera or past `dist` */
+  cullTrees(cam, dist, force) {
+    const px = cam.position.x, pz = cam.position.z, f = TV.set(0, 0, -1).applyQuaternion(cam.quaternion); const fl = Math.hypot(f.x, f.z) || 1, fx = f.x / fl, fz = f.z / fl;
+    const L = this.treeCam; if (!force && L && Math.hypot(px - L[0], pz - L[1]) < 4 && fx * L[2] + fz * L[3] > .97 && Math.abs(dist - L[4]) < 20) return; this.treeCam = [px, pz, fx, fz, dist];
+    const half = Math.atan(Math.tan(cam.fov * Math.PI / 360) * cam.aspect) + .55, cosH = fl < .45 ? -2 : Math.cos(Math.min(Math.PI, half)), near = this.treeNear, d2 = dist * dist, n2 = near * near;
+    const T = this.trees, M = this.treeM, C = this.treeC, cnt = [[0, 0], [0, 0], [0, 0], [0, 0]];
+    for (let i = 0; i < T.length; i++) { const t = T[i], dx = t.x - px, dz = t.z - pz, dd = dx * dx + dz * dz; if (dd > d2) continue; if (dd > 900) { const d = Math.sqrt(dd); if ((dx * fx + dz * fz) / d < cosH) continue; }
+      const lod = this.treeLod[t.k]; if (!lod) continue; const nearT = dd < n2, c = nearT ? lod.nc : lod.fc, tr = nearT ? lod.nt : lod.ft, j = cnt[t.k][nearT ? 0 : 1]++;
+      c.instanceMatrix.array.set(M.subarray(i * 16, i * 16 + 16), j * 16); tr.instanceMatrix.array.set(M.subarray(i * 16, i * 16 + 16), j * 16); c.instanceColor.array.set(C.subarray(i * 3, i * 3 + 3), j * 3); }
+    for (let k = 0; k < 4; k++) { const l = this.treeLod[k]; if (!l) continue; l.nc.count = l.nt.count = cnt[k][0]; l.fc.count = l.ft.count = cnt[k][1];
+      for (const im of [l.nc, l.nt, l.fc, l.ft]) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; im.visible = im.count > 0; } }
+  }
   // ---- queries
   /** first blocking hit between two points: terrain, buildings, low walls (if below their top), tree trunks. Returns t∈[0,1] or null */
   rayBlock(ax, ay, az, bx, by, bz, opts = {}) {
@@ -575,6 +614,7 @@ void main(){ vec3 d = normalize(vD); float y = max(d.y, 0.0); vec3 sd = normaliz
   coverAt(x, z) { let c = this.trenchD(x, z) < 1.6 ? .75 : 0; for (const k of this.covers) { const d = Math.hypot(k.x - x, k.z - z); if (d < 2.5) c = Math.max(c, .6); } if (this.inBuilding(x, z, 1.5)) c = Math.max(c, .5); return c; }
   dispose() { this.scene.remove(this.group); this.scene.remove(this.sky); this.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
 }
+const TV = new THREE.Vector3();
 function rayAABB(ox, oy, oz, dx, dy, dz, x0, y0, z0, x1, y1, z1) {
   let tmin = 0, tmax = 1; for (const [o, d, a, b] of [[ox, dx, x0, x1], [oy, dy, y0, y1], [oz, dz, z0, z1]]) { if (Math.abs(d) < 1e-9) { if (o < a || o > b) return null; } else { let t1 = (a - o) / d, t2 = (b - o) / d; if (t1 > t2) [t1, t2] = [t2, t1]; tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2); if (tmin > tmax) return null; } }
   return tmin;

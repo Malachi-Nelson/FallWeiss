@@ -155,7 +155,7 @@ function rng(s) { let x = s * 99991 + 7; return () => { x = (x * 16807) % 214748
 
 export const TEX = {};
 /** Generate every texture; quality 0..2 sets resolution. Yields between textures so the loading bar can repaint. */
-export async function buildTextures(quality, renderer, onStep) {
+async function paintTextures(quality, renderer, onStep, keep) {
   const S = quality >= 2 ? 1024 : quality === 1 ? 512 : 256, aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const list = [
     ['grass', S, 3], ['stubble', S, 2], ['dirt', S, 4], ['gravel', S, 3], ['cobble', S, 6], ['planks', S / 2, 3], ['concrete', S / 2, 3],
@@ -169,10 +169,37 @@ export async function buildTextures(quality, renderer, onStep) {
   for (let i = 0; i < list.length; i++) {
     const [name, s, str, o] = list[i]; const gen = GEN[(o && o.gen) || name];
     const r = gen(Math.max(64, s | 0), o || {});
-    TEX[name] = { map: tex(r.c, true, aniso), normal: r.alpha ? null : tex(normalFrom(r.H, r.S, str * (r.S / 256)), false, aniso) };
+    const ncv = r.alpha ? null : normalFrom(r.H, r.S, str * (r.S / 256)); TEX[name] = { map: tex(r.c, true, aniso), normal: ncv ? tex(ncv, false, aniso) : null }; if (keep) keep.push([name, r.c, ncv]);
     if (onStep) onStep((i + 1) / list.length);
     await new Promise(res => setTimeout(res, 0));
   }
-  if (!TEX.noise) TEX.noise = noiseTexture(256);
+  if (!TEX.noise) TEX.noise = noiseTexture(256); if (keep) keep.noise = TEX.noise.image.data;
   return TEX;
 }
+// ---------- phone pass: painted textures are saved in IndexedDB after the first battle and decoded straight from there on later
+// visits (painting them takes seconds on a phone CPU). The key includes a hash of the painters' source, so any change repaints.
+const IDB = 'fw-textures', STORE = 't';
+function idb() { return new Promise((res, rej) => { if (!self.indexedDB) return rej(new Error('no idb')); const r = indexedDB.open(IDB, 1); r.onupgradeneeded = () => r.result.createObjectStore(STORE); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function idbGet(k) { return idb().then(db => new Promise((res, rej) => { const q = db.transaction(STORE).objectStore(STORE).get(k); q.onsuccess = () => { res(q.result); db.close(); }; q.onerror = () => { rej(q.error); db.close(); }; })); }
+function idbPut(k, v) { return idb().then(db => new Promise((res, rej) => { const t = db.transaction(STORE, 'readwrite'); t.objectStore(STORE).clear(); t.objectStore(STORE).put(v, k); t.oncomplete = () => { res(); db.close(); }; t.onerror = () => { rej(t.error); db.close(); }; })); }
+function srcHash() { let h = 5381; const str = Object.values(GEN).map(f => f.toString()).join('') + paintTextures.toString() + normalFrom.toString() + noiseTexture.toString() + drawWindow.toString(); for (let i = 0; i < str.length; i++) h = (h * 33 + str.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+function bmpTex(bmp, srgb, aniso) { const t = new THREE.Texture(bmp); t.flipY = false; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; if (srgb) t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.needsUpdate = true; return t; }
+const decode = b => createImageBitmap(b, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+const toBlob = c => new Promise(r => c.toBlob(b => r(b), 'image/png'));
+export async function buildTextures(quality, renderer, onStep) {
+  const key = 'q' + quality + '-' + srcHash(), aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  try {
+    const hit = await idbGet(key);
+    if (hit && hit.list && hit.noise) {
+      const out = await Promise.all(hit.list.map(async ([name, m, n]) => [name, await decode(m), n ? await decode(n) : null])); onStep?.(.9);
+      for (const [name, m, n] of out) TEX[name] = { map: bmpTex(m, true, aniso), normal: n ? bmpTex(n, false, aniso) : null };
+      if (!TEX.noise) { const S = Math.sqrt(hit.noise.length / 4) | 0, t = new THREE.DataTexture(hit.noise, S, S, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true; TEX.noise = t; }
+      onStep?.(1); TEX.fromCache = true; return TEX;
+    }
+  } catch (e) { /* no cache: paint */ }
+  const keep = []; await paintTextures(quality, renderer, onStep, keep); TEX.fromCache = false;
+  // save in the background once the battle is running
+  TEX.saving = new Promise(r => setTimeout(r, 4000)).then(async () => { const list = []; for (const [name, c, n] of keep) list.push([name, await toBlob(c), n ? await toBlob(n) : null]); if (!list.every(l => l[1])) throw new Error('toBlob failed'); await idbPut(key, { list, noise: keep.noise }); return list.length; }).catch(e => { console.warn('texture cache not saved', e); return 0; });
+  return TEX;
+}
+
