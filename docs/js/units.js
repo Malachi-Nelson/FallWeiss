@@ -148,6 +148,7 @@ export class Unit {
   pose(dt) {
     this.root.position.set(this.x, this.y, this.z); this.root.rotation.y = this.yaw;
     const cam = this.g.camera.position, d = Math.hypot(cam.x - this.x, cam.z - this.z); this.camD = d;
+    const sh = d < this.g.unitShadowDist && this.g.quality > 0; if (sh !== this.shadowOn) { this.shadowOn = sh; this.model.traverse(o => { if (o.isMesh) o.castShadow = sh; }); }
     if (this.kind === 'inf') {
       const far = d > this.g.lodDist; if (this.proxy) { this.proxy.visible = far && !this.isPlayer; this.model.visible = !far && !this.isPlayer; }
       this.stanceV += (this.stance - this.stanceV) * Math.min(1, dt * 6); const s = this.stanceV;

@@ -18,7 +18,7 @@ const { Audio } = SND;
 
 const $ = s => document.querySelector(s);
 const _E = new THREE.Euler(), _V = new THREE.Vector3(), _V2 = new THREE.Vector3(), _R = new THREE.Vector3(), _U = new THREE.Vector3(), _C = new THREE.Vector3(), _UP = new THREE.Vector3(0, 1, 0), _T = new THREE.Color();
-const VERSION = 'web 1.1 · ' + new Date(document.lastModified).toISOString().slice(0, 10);
+const VERSION = 'web 1.3 · ' + new Date(document.lastModified).toISOString().slice(0, 10);
 const MV = { rifle: 760, atr: 1275, smg: 380, pistol: 350, lmg: 853, mg34: 755, mg30: 850 };
 
 class Game {
@@ -51,8 +51,18 @@ class Game {
   /** keep the frame rate up: trade a little resolution for speed when the device cannot keep up, and take it back when it can */
   adaptRes(raw) {
     if (this.state !== 'play' || raw <= 0 || raw > .5) return; this.drT = (this.drT || 0) + raw; this.drN = (this.drN || 0) + 1; if (this.drT < 2.5) return;
-    const fps = this.drN / this.drT; this.drT = this.drN = 0; let sc = this.resScale ?? 1;
-    if (fps < 42 && sc > .55) sc = Math.max(.55, sc - .12); else if (fps > 57 && sc < 1) sc = Math.min(1, sc + .06); else return; this.resScale = sc; this.resize();
+    const fps = this.drN / this.drT, goal = this.fpsCap || 60; this.drT = this.drN = 0; let sc = this.resScale ?? 1;
+    if (fps < goal * .72) { if (sc > .55) { sc = Math.max(.55, sc - .12); this.slowN = 0; } else if (++this.slowN >= 2) { this.slowN = 0; this.shedLoad(); return; } else return; }
+    else if (fps > goal * .95 && sc < 1) sc = Math.min(1, sc + .06); else { this.slowN = 0; return; }
+    this.resScale = sc; this.resize();
+  }
+  /** phone pass: when even the lowest resolution can't hold the frame rate, drop the costliest effects one at a time */
+  shedLoad() {
+    const L = this.perfShed = (this.perfShed || 0) + 1;
+    if (L === 1 && this.sun?.castShadow) { this.sun.castShadow = false; this.unitShadowDist = 0; this.hud.hint('Shadows off to keep the game smooth', 2.5); }
+    else if (L <= 2 && this.grass?.mesh) { this.grass.on = false; this.grass.mesh.visible = false; this.hud.hint('Grass thinned to keep the game smooth', 2.5); }
+    else if (L <= 3 && this.post) { this.post.dispose(); this.post = null; this.hud.hint('Screen effects off to keep the game smooth', 2.5); }
+    else if (L <= 4) { this.world.treeNear = 20; this.lodDist = Math.min(this.lodDist, 20); this.world.treeCam = null; }
   }
   /** the online session while in an online battle (host or client), otherwise null */
   get net() { return this.online && this.online.inBattle ? this.online : null; }
@@ -84,11 +94,11 @@ class Game {
     const S = this.settings; const opt = (id, vals, cur, cb) => { $(id).innerHTML = vals.map(([v, l]) => `<button class="${v === cur ? 'sel' : ''}" data-v="${v}">${l}</button>`).join(''); $(id).querySelectorAll('button').forEach(b => b.onclick = () => { cb(b.dataset.v); this.saveSettings(); this.menu(); }); };
     opt('#o-q', [[0, 'Low'], [1, 'Medium'], [2, 'High']], S.quality, v => { S.quality = +v; this.resize(); });
     opt('#o-size', [[.35, 'Skirmish'], [.5, 'Company'], [.8, 'Battalion'], [1, 'Historical']], S.size, v => S.size = +v);
-    opt('#o-len', [['short', '15 min'], ['full', 'Historical clock']], S.length, v => S.length = v);
+    opt('#o-len', [['quick', '8 min'], ['short', '15 min'], ['full', 'Historical clock']], S.length, v => S.length = v);
     opt('#o-sens', [[.6, 'Low'], [1, 'Normal'], [1.5, 'High'], [2.2, 'Very high']], S.sens, v => S.sens = +v);
     opt('#o-plan', [[1, 'Place them myself'], [0, 'Automatic']], S.plan ? 1 : 0, v => S.plan = !!+v);
     $('#touchopts').style.display = this.touch ? '' : 'none';
-    if (this.touch) { opt('#o-tb', [['S', 'Small'], ['M', 'Normal'], ['L', 'Large']], S.tb, v => { S.tb = v; this.touchUI.setSize(v); }); opt('#o-assist', [[1, 'On'], [0, 'Off']], S.assist ? 1 : 0, v => S.assist = !!+v); }
+    if (this.touch) { opt('#o-tb', [['S', 'Small'], ['M', 'Normal'], ['L', 'Large']], S.tb, v => { S.tb = v; this.touchUI.setSize(v); }); opt('#o-assist', [[1, 'On'], [0, 'Off']], S.assist ? 1 : 0, v => S.assist = !!+v); opt('#o-fps', [[60, 'Smooth (60)'], [30, 'Battery saver (30)']], S.fpsCap ?? 60, v => S.fpsCap = +v); }
     const ios = /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), standalone = navigator.standalone || matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
     $('#fsnote').textContent = ios && !standalone ? 'iPhone: Share → Add to Home Screen plays full screen' : ''; $('#fs').style.display = (ios && !standalone) || standalone ? 'none' : '';
     $('#phelp2').textContent = this.touch ? 'Left thumb: move (push to the edge to run) · Right thumb: look · FIRE (also aims while held) · AIM toggles the sights · RELOAD · CROUCH / PRONE · NADE · SWAP weapon · MAP · ❚❚ pause' : 'Desktop: WASD move · Shift sprint · Mouse aim · LMB fire · RMB aim · C crouch · Z prone · R reload · G grenade · Q switch · B bandage · M map · Esc pause';
@@ -140,8 +150,9 @@ class Game {
       await step('Deploying forces…', .9); if (!planning) this.deployForces(this.autoPlan());
       await step('Lighting the sky…', .96); this.grass = new Grass(this.scene, this.world, this.settings.quality); for (const k in this.mats) patchFog(this.mats[k]); patchScene(this.scene); this.bakeSky(true);
       if (this.post) { this.post.dispose(); this.post = null; } if (this.settings.quality >= 1) { this.post = new Post(this.renderer, this.settings.quality); this.post.resize(); }
+      await step('Preparing shaders…', .98);
+      try { if (this.renderer.extensions.has('KHR_parallel_shader_compile')) { await this.renderer.compileAsync(this.scene, this.camera); await this.renderer.compileAsync(this.vmScene, this.vmCamera); } else { this.renderer.compile(this.scene, this.camera); this.renderer.compile(this.vmScene, this.vmCamera); } } catch (e) { this.renderer.compile(this.scene, this.camera); }
       await step('Ready', 1);
-      this.renderer.compile(this.scene, this.camera);
     } catch (e) { console.error(e); lt.textContent = 'Error: ' + e.message; return; }
     $('#loading').style.display = 'none';
     if (planning) { this.state = 'plan'; this.hud.show(false); this.planner.open((groups, left) => { this.deployForces(groups); this.state = 'deploy'; this.showDeploy(true, left); }); return; }
@@ -151,7 +162,8 @@ class Game {
 
   // ================= mission =================
   setupMission(MU) {
-    const q = this.settings.quality; this.quality = q; this.lodDist = this.touch ? [25, 38, 60][q] : [35, 55, 80][q];
+    this.perfShed = 0; this.slowN = 0; this.fpsCap = this.touch ? (this.settings.fpsCap ?? 60) : 0;
+    const q = this.settings.quality; this.quality = q; this.lodDist = this.touch ? [25, 38, 60][q] : [35, 55, 80][q]; this.unitShadowDist = this.touch ? [0, 22, 34][q] : [0, 40, 60][q];
     if (!this.mats) this.mats = { cloth: modelMaterial('cloth'), steel: modelMaterial('steel'), vm: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .6, metalness: .15 }), burnt: new THREE.MeshStandardMaterial({ color: 0x1c1a18, roughness: 1 }), proxy: new THREE.MeshLambertMaterial({ vertexColors: true }) };
     const sc = this.scene = new THREE.Scene(); this.world = new World(MU, q, sc); const M = this.M = this.world.M;
     this.fx = new Fx(sc, q); this.fx.setScale(innerHeight * this.renderer.getPixelRatio());
@@ -161,7 +173,7 @@ class Game {
     sc.add(this.sun); sc.add(this.sun.target); this.hemi = new THREE.HemisphereLight(0xffffff, 0x4a4030, .5); sc.add(this.hemi); this.skyLight = this.skyLight || new SkyLight(this.renderer);
     sc.fog = new THREE.Fog(new THREE.Color(M.skyHor), M.fogNear, M.fogFar);
     this.dry = !M.hasRain; this.time = 0; this.night = false; this.markers = []; this.grenades = []; this.rounds = []; this.engines = 0;
-    this.roundLen = this.settings.length === 'short' ? Math.min(M.time, 900) : M.time; this.timeLeft = this.roundLen;
+    this.roundLen = this.settings.length === 'quick' ? Math.min(M.time, 480) : this.settings.length === 'short' ? Math.min(M.time, 900) : M.time; this.timeLeft = this.roundLen;
     this.objectives = M.points.map((p, i) => ({ ...p, r: p.w > 0 && p.d > 0 ? Math.max(p.w, p.d) / 2 : p.r > 0 ? p.r : 14, owner: 1 - M.attacker, prog: 0, i }));
     this.activeObj = 0; this.lockT = 0; this.over = false; this.stats = { kills: 0, deaths: 0, caps: 0, shots: 0, hits: 0 };
     const base = M.tickets || 200; this.tickets = [0, 0]; this.tickets[M.attacker] = Math.round(base * this.settings.size); this.tickets[1 - M.attacker] = Math.round(base * .75 * this.settings.size);
@@ -227,12 +239,14 @@ class Game {
   showDeploy(first, left = 0) {
     setEnabled(false); this.hud.show(true); const d = $('#deploy'); d.style.display = 'flex'; const M = this.M;
     const cs = CLASSES.filter(c => c.team === undefined || c.team === this.side);
-    const sp = this.spawnPoint(this.side);
+    const sp = this.spawnPoint(this.side), ss = this.squadSpawn(); if (!ss && this.deployAt === 'squad') this.deployAt = 'hq'; if (!this.deployAt) this.deployAt = 'squad';
+    const where = ss ? `<div class="row"><button class="dat ${this.deployAt !== 'squad' ? 'sel' : ''}" data-w="hq">${esc(sp.label)}<small>rear, safe</small></button><button class="dat ${this.deployAt === 'squad' ? 'sel' : ''}" data-w="squad">With your section<small>${esc(ss.label)}</small></button></div>` : '';
     d.innerHTML = `<div class="panel"><h2>${first ? M.name : 'Killed in action'}</h2><p>${first ? `${SIDE[this.side]} — ${this.side === M.attacker ? 'take the positions in order' : 'hold the positions until the clock runs out'}.` : (this.deathMsg || '')}</p>
       <div class="row">${cs.map(c => `<button class="cls ${c.key === this.cls ? 'sel' : ''}" data-k="${c.key}">${c.label}<small>${c.weps[this.side].join(' · ')}</small></button>`).join('')}</div>
-      ${first && left > 0 ? `<p class="small">${left} unit${left === 1 ? '' : 's'} left out of the battle.</p>` : ''}<p class="small">Reinforcements: ${Math.max(0, this.tickets[this.side])} · Deploying at ${sp.label}${this.net ? ` · Online: ${this.net.host ? 'you are hosting — keep this tab open' : 'playing in ' + esc(this.online.games.get(this.online.gid)?.host || 'the host') + '\'s battle'}` : ''}</p>
-      <button id="go" class="big">${first ? 'Deploy' : 'Redeploy'}</button> <button id="quit">Quit to menu</button></div>`;
+      ${first && left > 0 ? `<p class="small">${left} unit${left === 1 ? '' : 's'} left out of the battle.</p>` : ''}<p class="small">Reinforcements: ${Math.max(0, this.tickets[this.side])} · Deploying ${this.deployAt === 'squad' && ss ? 'with your section' : 'at ' + esc(sp.label)}${this.net ? ` · Online: ${this.net.host ? 'you are hosting — keep this tab open' : 'playing in ' + esc(this.online.games.get(this.online.gid)?.host || 'the host') + '\'s battle'}` : ''}</p>
+      ${where}<button id="go" class="big">${first ? 'Deploy' : 'Redeploy'}</button> <button id="quit">Quit to menu</button></div>`;
     d.querySelectorAll('.cls').forEach(b => b.onclick = () => { this.cls = b.dataset.k; this.showDeploy(first, left); });
+    d.querySelectorAll('.dat').forEach(b => b.onclick = () => { this.deployAt = b.dataset.w; this.showDeploy(first, left); });
     const go = () => { if (!first && this.redeployT > 0) return; d.style.display = 'none'; this.spawnPlayer(); this.state = 'play'; setEnabled(true); this.lockPointer(); if (first) this.hud.banner(M.name, M.date, 5); };
     d.querySelector('#go').onclick = go; d.querySelector('#quit').onclick = () => this.leaveBattle();
     if (!first) { const b = d.querySelector('#go'); const tick = () => { if (this.redeployT > 0) { b.textContent = `Redeploy in ${Math.ceil(this.redeployT)}`; b.disabled = true; setTimeout(tick, 200); } else { b.textContent = 'Redeploy'; b.disabled = false; } }; tick(); }
@@ -247,13 +261,24 @@ class Game {
     if (this.world.blocked(p.x, p.z, 2) || this.world.waterDepth(p.x, p.z) > .2) p = this.rearSpawn[team];
     return { ...p, label };
   }
+  /** phone pass (RO2 squad-leader spawn): rejoin your section near the front instead of walking back from the rear, if it is
+   *  alive, not pinned and no enemy is within 40 m of it */
+  squadSpawn() {
+    if (this.net?.client || this.M.range || !this.playerSquad) return null; const me = this.side, es = this.M.spawn[1 - me];
+    const ms = this.playerSquad.members.filter(m => m.alive && !m.isPlayer && m.kind === 'inf' && m.supp < .6 && this.world.waterDepth(m.x, m.z) < .2).sort((a, b) => (b.leader ? 1 : 0) - (a.leader ? 1 : 0));
+    for (const m of ms) { if (this.queryUnits(m.x, m.z, 40, u => u.alive && u.team !== me).length) continue; const dx = es.x - m.x, dz = es.z - m.z, d = Math.hypot(dx, dz) || 1; let x = m.x - dx / d * 4, z = m.z - dz / d * 4; if (this.world.blocked(x, z, .6)) { x = m.x; z = m.z; }
+      const o = this.objectives[Math.min(this.activeObj, this.objectives.length - 1)]; return { x, z, label: `${m.name}, ${Math.round(Math.hypot(o.x - m.x, o.z - m.z))} m from ${String.fromCharCode(65 + Math.min(this.activeObj, this.objectives.length - 1))}`, u: m }; }
+    return null;
+  }
   spawnPlayer() {
-    const sp = this.spawnPoint(this.side); let x = sp.x + (Math.random() - .5) * 8, z = sp.z + (Math.random() - .5) * 8; [x, z] = this.world.collide(x, z, .5);
+    let sp = this.spawnPoint(this.side); const hq = sp; let atSquad = false;
+    if (this.deployAt === 'squad') { const ss = this.squadSpawn(); if (ss) { sp = ss; atSquad = true; } else this.hud.hint('Your section is in contact — deploying at the rear', 3); }
+    let x = sp.x + (Math.random() - .5) * (atSquad ? 2 : 8), z = sp.z + (Math.random() - .5) * (atSquad ? 2 : 8); [x, z] = this.world.collide(x, z, .5);
     if (this.player) this.player.dispose(); const p = this.player = new Player(this, this.side, this.cls, x, z); if (this.tickets[this.side] > 0 && !this.M.range) this.tickets[this.side]--;
     const o = this.objectives[Math.min(this.activeObj, this.objectives.length - 1)]; p.yaw = Math.atan2(-(o.x - x), -(o.z - z));
     // a section of men deploys with you
     const sq = this.playerSquad; sq.members = sq.members.filter(m => m.alive); const need = this.M.range || this.net?.client ? 0 : Math.max(0, Math.round(5 * Math.max(.6, this.settings.size)) - sq.alive.length);
-    for (let i = 0; i < need && this.tickets[this.side] > 0; i++) { const u = this.spawnUnit(this.side, i === 1 ? 'mg' : 'rifle', x + (Math.random() - .5) * 10, z + (Math.random() - .5) * 10, { squad: sq, yaw: p.yaw }); this.tickets[this.side]--; }
+    for (let i = 0; i < need && this.tickets[this.side] > 0; i++) { const u = this.spawnUnit(this.side, i === 1 ? 'mg' : 'rifle', hq.x + (Math.random() - .5) * 10, hq.z + (Math.random() - .5) * 10, { squad: sq, yaw: p.yaw }); this.tickets[this.side]--; }
     if (this.net?.client) { this.online.life++; this.online.act('sp', this.online.life); }
     sq.members.push(p); sq.setOrder(this.orderFor(this.side, sq)); this.hud.hint(this.touch ? 'Left thumb: move (push to the edge to run) · Right thumb: look · AIM toggles the sights' : 'WASD move · Mouse aim · LMB fire · RMB aim · C/Z stance · R reload · G grenade · M map', 6);
   }
@@ -617,6 +642,7 @@ class Game {
 
   // ================= frame =================
   frame() {
+    if (this.fpsCap && this.state === 'play') { const now = performance.now(); if (now - (this.lastF || 0) < 1000 / this.fpsCap - 4) return; this.lastF = now; }
     const raw = this.clock.getDelta(); let dt = Math.min(.05, raw); this.adaptRes(raw); try { this.online.tick(performance.now()); } catch (e) { console.error(e); } if (!this.scene || this.state === 'loading' || this.state === 'plan') { return; }
     if (I.pauseTap) { I.pauseTap = false; if (this.state === 'play') this.pause(true); else if (this.state === 'paused') this.pause(false); }
     if (I.mapTap) { I.mapTap = false; this.hud.toggleMap(); }
@@ -637,7 +663,7 @@ class Game {
       this.sun.position.copy(_C).addScaledVector(s, 200); this.sun.target.position.copy(_C); this.sun.target.updateMatrixWorld(); }
     FOGU.fwTime.value = this.time; const wm = this.world.waterMat; if (wm && wm.normalMap) wm.normalMap.offset.set(this.time * .011, this.time * .006);
     this.world.sky.position.copy(cam.position); this.world.skyU.time.value = this.time;
-    this.treeT = (this.treeT || 0) - dt; if (this.treeT <= 0) { this.treeT = .5; this.world.cullTrees(cam.position.x, cam.position.z, this.scene.fog.far * .85); }
+    this.treeT = (this.treeT || 0) - dt; if (this.treeT <= 0) { this.treeT = .12; this.world.cullTrees(cam, this.scene.fog.far * .85); }
     this.fx.update(dt, cam); if (this.grass) this.grass.update(cam, dt);
     if (this.state !== 'menu' && this.state !== 'loading') this.hud.update(dt);
     // render world, then the viewmodel over it with its own depth

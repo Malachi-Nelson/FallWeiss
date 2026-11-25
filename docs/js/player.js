@@ -79,6 +79,11 @@ export class Player {
     if (I.bandageTap) { I.bandageTap = false; if (this.bleed > 0 && this.bandT <= 0) { this.bandT = 3.2; SND.mech('switch'); } }
     if (this.bandT > 0) { this.bandT -= dt; if (this.bandT <= 0) this.bleed = 0; }
     this.supp = Math.max(0, this.supp - dt * .35);
+    // phone pass: take ammunition from the fallen by walking over them (no button to find)
+    this.lootT = (this.lootT || 0) - dt; if (this.lootT <= 0) { this.lootT = .3; for (const u of g.units) { if (u.alive || u.looted || u.kind !== 'inf' || Math.abs(u.x - this.x) > 1.8 || Math.abs(u.z - this.z) > 1.8 || Math.hypot(u.x - this.x, u.z - this.z) > 1.8) continue;
+      u.looted = true; const s = this.slots[0], w = s.w; const cap = w.mags + 2, got = []; if (s.mags < cap) { s.mags = Math.min(cap, s.mags + (w.mg ? 1 : 2)); got.push(w.clipLoad ? 'clips' : w.mg ? 'a belt' : 'magazines'); }
+      if (this.nades < 2 && Math.random() < .5) { this.nades++; got.push('a grenade'); }
+      if (got.length) { SND.mech('clip'); g.hud.hint('Took ' + got.join(' and ') + ' from ' + (u.team === this.team ? u.name : 'the body'), 2); g.buzz?.(15); } break; } }
     // weapon handling
     this.weapon(dt, I, sprint);
     this.camera(dt, sprint);
